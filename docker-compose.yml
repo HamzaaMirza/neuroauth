@@ -1,0 +1,31 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: neuroauth
+      POSTGRES_PASSWORD: neuroauth
+      POSTGRES_DB: neuroauth
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U neuroauth"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NEUROAUTH_DATABASE_URL: postgresql://neuroauth:neuroauth@postgres:5432/neuroauth
+    volumes:
+      - ./data:/app/data
+      - ./artifacts:/app/artifacts
+    command: ["python", "-m", "scripts.migrate_db"]
+
+volumes:
+  pgdata:

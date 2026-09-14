@@ -13,20 +13,21 @@ the main failure mode for this project.
 Get from raw EDF files to a working classifier. Deliberately closed-set at this stage — Phase 2
 reframes it. This phase exists to build the signal pipeline and establish a baseline number.
 
-- [ ] Download and verify `eegmmidb` (109 subjects, EDF+)
-- [ ] MNE loader: read EDF, extract baseline runs R01/R02
-- [ ] Preprocessing: bandpass 1–50 Hz, notch 60 Hz
-- [ ] Windowing: 2s windows, 50% overlap
-- [ ] Feature extraction: Welch PSD band powers (δ θ α β γ) per channel, with quality mask
-- [ ] Random Forest identification baseline across subjects
-- [ ] Evaluation: macro-F1, per-class F1, confusion matrix
-- [ ] Postgres schema (subjects, sessions, events — templates come in Phase 2)
-- [ ] Docker Compose: app + postgres
-- [ ] pytest suite covering the feature pipeline
-- [ ] `docs/DECISIONS.md` started
+- [x] Download and verify `eegmmidb` (109 subjects, EDF+)
+- [x] MNE loader: read EDF, extract baseline runs R01/R02
+- [x] Preprocessing: bandpass 1–50 Hz, notch 60 Hz
+- [x] Windowing: 2s windows, 50% overlap
+- [x] Feature extraction: Welch PSD band powers (δ θ α β γ) per channel, with quality mask
+- [x] Random Forest identification baseline across subjects
+- [x] Evaluation: macro-F1, per-class F1, confusion matrix
+- [x] pytest suite covering the feature pipeline
+- [x] `docs/DECISIONS.md` started
+- Postgres schema and Docker Compose → moved to Phase 2 (D-019)
 
 **Exit criteria:** a window goes in, a subject prediction comes out, and there is a macro-F1
 number with a confusion matrix committed to the repo.
+
+**Status: complete (2026-09-14).** Results in the README; artifacts in `artifacts/`.
 
 ---
 
@@ -35,7 +36,11 @@ number with a confusion matrix committed to the repo.
 
 This is where it becomes an authentication system rather than a classifier.
 
+- [ ] Docker Compose: app + postgres *(moved from Phase 1, D-019)*
+- [ ] Apply the Postgres schema — `migrations/001_phase1_core.sql` is written; implement
+      `db/connection.py`, `db/migrate.py`, and `ingest_subjects.py` *(moved from Phase 1, D-019)*
 - [ ] Hold out N subjects entirely as impostors — never enrolled, never trained on
+      *(20 already fixed and committed in Phase 1, D-008; confirm the count for a stable FAR)*
 - [ ] Reframe to open-set verification: score against a claimed identity
 - [ ] Metrics: EER, FAR, FRR, FRR@FAR=0.001, DET curve
 - [ ] Cancelable transform (random projection / bio-hashing), per-user seed

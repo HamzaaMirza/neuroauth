@@ -1,15 +1,18 @@
 # PROGRESS — NeuroAuth
 
-**Current phase:** 1 — Signal pipeline + identification baseline
-**Status:** Final Phase 1 run complete from clean, pushed commit `fa98250`, with the EMG
-ablations. README results section written. **Exit criteria are met once the regenerated
-artifacts, README, and docs are committed.** Two checklist items remain off the exit
-path: Docker Compose and applying the Postgres schema.
+**Current phase:** 2 — Verification + continuous session + template protection
+**Status:** Not started. Phase 1 complete and committed (`a1e6596`, pushed).
 **Last updated:** 2026-09-14
 
 ---
 
-## Phase 1 results (89 enrollable subjects, chance 0.011)
+## Where things stand
+
+**Phase 1 is complete.** Exit criteria met: a window goes in, a subject prediction
+comes out, and macro-F1 with a confusion matrix is committed. Docker Compose and the
+Postgres setup were moved to Phase 2 (D-019).
+
+### Phase 1 results (89 enrollable subjects, chance 0.011)
 
 | Normalization | Split | Macro-F1 | Shuffled control (ceiling 0.034) |
 |---|---|---|---|
@@ -21,48 +24,64 @@ path: Docker Compose and applying the Postgres schema.
 - **Brain-state change is the dominant effect:** 0.846 within condition vs 0.378 across.
 - **Absolute − relative:** +0.219 / +0.110. Upper bound on the session-artifact
   contribution; anatomy cannot be separated out (D-004).
-- **Leakage demonstration (D-017):** guarded 0.846 vs deliberately leaky 0.906; 90% of
-  leaky test windows share samples; control on the leaky split 0.011 (chance).
+- **Leakage demonstration (D-017):** guarded 0.846 vs deliberately leaky 0.906; the
+  shuffled-label control on the leaky split reads chance.
 - **Frontal EOG (D-004b):** does not concentrate; too small to act on.
-- **EMG ablations (D-018):** without gamma 0.263 (drop 0.116), without the temporal
-  sites 0.300 (drop 0.078). Both material; bounds, not EMG estimates. Importance
-  re-routes in each: without gamma, beta leads and temporal sites still top the channel
-  ranking; without the temporal sites, gamma still leads and Iz/frontal channels rise.
-- **Delta (D-005):** kept. **Quality (D-015):** flagged windows scored, not excluded.
-- **Reproducibility:** runs from `b3450bf` and `fa98250` produced byte-identical
-  baseline artifacts.
+- **EMG ablations (D-018):** without gamma 0.263 (drop 0.116), without temporal sites
+  0.300 (drop 0.078). Both material; bounds, not EMG estimates; importance re-routes.
+- **Reproducibility:** baseline artifacts byte-identical across runs from `b3450bf` and
+  `fa98250`.
 
-### Phase 2 expectation: the per-subject tail
+### What Phase 2 inherits
 
-**14 of 89 subjects score F1 = 0 on the headline split** (21 below 0.1), while the
-median is 0.36. Identity features survive the brain-state change for most subjects and
-not at all for some. Expect the Phase 2 per-subject EER distribution to carry a heavy
-tail. Report per-subject EER (distribution and worst decile), not only the pooled
-number, and check whether the same subjects sit in both tails.
+- **Signal pipeline:** `dsp/` (io, preprocess, windowing, features, pipeline), MNE
+  confined to `io.py` (D-001). `window_stream_chunk` exists for the streaming path.
+- **Impostor holdout:** 20 subjects in `config/impostor_holdout.json`, committed alone
+  before any result (`1f25cd2`). The file is the source of truth (D-008).
+- **Evaluation discipline:** leakage-safe splits with an overlap assertion, the
+  shuffled-label gate, thresholds fixed before the runs they judge (D-016), and a driver
+  that refuses to write artifacts from uncommitted code.
+- **Written but unexercised:** `migrations/001_phase1_core.sql`, `docker-compose.yml`,
+  `Dockerfile`, stubs in `db/` and `scripts/ingest_subjects.py`.
 
 ---
 
-## Next up
+## Next up (Phase 2)
 
-1. **Commit** regenerated artifacts, README, and docs; push.
-2. **Phase 1 close-out:** install Docker, run Compose, implement `db/connection.py` and
-   `db/migrate.py`, apply `001_phase1_core.sql`, implement `ingest_subjects.py`
-   (asserting DB cohorts match the committed holdout file).
-3. Tick the Phase 1 checklist in `docs/ROADMAP.md`, then Phase 2.
+Read `docs/ROADMAP.md` Phase 2 first. The carried-over items are listed there.
+
+1. Install Docker; run Compose; implement `db/connection.py` and `db/migrate.py`;
+   apply `001_phase1_core.sql` (D-019).
+2. `ingest_subjects.py` — assert DB cohorts match the committed holdout file; never
+   re-derive (D-008).
+3. Confirm the impostor count against a FAR-stability argument (nested selection means
+   raising it keeps the 20 already committed).
+4. Reframe to open-set verification; EER, FAR, FRR, FRR@FAR=0.001, DET curve.
+5. Fix Phase 2 evaluation thresholds before the runs they judge (D-016 rule).
+
+### Phase 2 expectation: the per-subject tail
+
+**14 of 89 subjects score F1 = 0 on the Phase 1 headline split** (21 below 0.1), while
+the median is 0.36. Identity features survive the brain-state change for most subjects
+and not at all for some. Expect the per-subject EER distribution to carry a heavy tail.
+Report per-subject EER (distribution and worst decile), not only the pooled number, and
+check whether the same subjects sit in both tails.
 
 ---
 
 ## Open questions
 
+- **Filter edge effects on short buffers.** Same preprocessing function on both paths,
+  but `sosfiltfilt` edge transients differ between a 61 s recording and a short live
+  buffer. D-001 removes code skew, not this. Needs a buffering strategy for the
+  WebSocket path.
 - **Combined EMG ablation (D-018).** Each single ablation leaves the other route open.
-  Removing gamma and the temporal sites together would bound the dependence on both at
-  once. Not run; if it is, fix its materiality threshold first.
-- **Phase 2: filter edge effects on short buffers.** Same preprocessing function on
-  both paths, but `sosfiltfilt` edge transients differ between a 61 s recording and a
-  short live buffer. D-001 removes code skew, not this.
-- **Window size.** 2 s. Revisit in Phase 2 (D-005).
-- **How many impostor subjects.** 20; nested, so the count can rise in Phase 2 (D-008).
-- **Channel subset.** Not Phase 1. CAR must be part of that experiment's design (D-006).
+  Not run; if it is, fix its materiality threshold first.
+- **Window size.** 2 s; also the time-to-detect floor for an impostor swap (D-005).
+- **How many impostor subjects.** 20; nested, so the count can rise (D-008).
+- **Quality-mask recalibration** on the enrollable cohort, once the mask gates sessions
+  (D-015).
+- **Channel subset.** CAR must be part of that experiment's design (D-006).
 - **Lint:** `scripts/verify_dataset.py` has an en dash in a print string (RUF001).
 
 ---
@@ -73,14 +92,13 @@ number, and check whether the same subjects sit in both tails.
 - Container service choice (ECS Fargate vs App Runner) — Phase 4, gated on WebSocket
   support
 - Threshold values for challenge/revoke — Phase 2, tuned against the DET curve
-- Quality-mask recalibration on the enrollable cohort — Phase 2 (D-015)
 - Alembic — Phase 2, when SQLAlchemy models exist (D-009)
 
 ---
 
 ## Blockers
 
-Docker is not installed; needed for the remaining Phase 1 checklist items.
+Docker is not installed; needed at the start of Phase 2.
 
 ---
 
@@ -89,24 +107,19 @@ Docker is not installed; needed for the remaining Phase 1 checklist items.
 <!-- Append one entry per session. Newest at top. Keep entries short. -->
 
 ### 2026-09-14
-**Phase:** 1
-**Shipped:** `dsp/` (io, preprocess, windowing, features, pipeline) with tests;
-egg-info untracked. `drop_partial` removed; quality threshold 250 → 500 uV.
-`cohorts.py`, `scripts/select_holdout.py`, holdout committed alone and pushed.
-`models/splits.py`, `models/baseline.py`, `models/evaluation.py`, `models/ablation.py`.
-`config.fingerprint()`. Deliberately leaky split + overlap counting.
-`scripts/train_baseline.py` with holdout-committed and clean-tree preconditions.
-Smoke run; full baseline run from `b3450bf` (committed `6fa508d`); final run with EMG
-ablations from `fa98250`. README results section. D-004 (corrected), D-004b, D-005,
-D-018 (outcomes), D-007 (corrected), D-008 (updated), D-013–D-018.
-**Next:** Commit; Docker/Postgres close-out.
-**Notes / decisions:** Band-power contract was wrong, fixed (D-013). Quality mask at
-250 uV flagged EOG and eyes-closed alpha; raised and made report-only (D-015). The
-shuffled-label control cannot detect overlap leakage (D-007), confirmed on real data
-(D-017). All evaluation thresholds fixed before the runs they judge (D-016). Headline
-0.378. Frontal EOG does not concentrate. Absolute/relative wording corrected to an upper
-bound. Both EMG ablations material, reported as bounds with re-routing noted. Baseline
-artifacts reproduced byte for byte. User commits; never auto-commit.
+**Phase:** 1 → complete
+**Shipped:** `dsp/` (io, preprocess, windowing, features, pipeline); `cohorts.py` and
+the committed impostor holdout; `models/` (splits, baseline, evaluation, ablation);
+`config.fingerprint()`; `scripts/select_holdout.py`, `scripts/train_baseline.py` with
+holdout-committed and clean-tree preconditions. Baseline run, leakage demonstration,
+EMG ablations; README results section. D-004 (corrected), D-004b, D-005, D-007
+(corrected), D-008 (updated), D-013–D-019. Docker/Postgres moved to Phase 2.
+**Next:** Phase 2, starting with Docker and the database.
+**Notes / decisions:** Headline 0.378 (34× chance). Brain-state change dominates. The
+shuffled-label control cannot detect overlap leakage — shown on synthetic and real data.
+The absolute/relative gap and the EMG drops are reported as bounds, never as
+decompositions. All evaluation thresholds were fixed before the runs they judge.
+Artifacts reproduced byte for byte. User commits; never auto-commit.
 
 ### 2026-08-21
 **Phase:** 1

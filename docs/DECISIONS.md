@@ -573,3 +573,21 @@ it is, its materiality threshold has to be fixed first.
 
 The same run reproduced all four baseline models' artifacts byte for byte against the
 `b3450bf` run.
+
+---
+
+### D-019 — Docker Compose and the Postgres setup move from Phase 1 to Phase 2
+
+**Decision.** Phase 1 closed on 2026-09-14 with the Postgres schema and Docker Compose
+file written but never exercised. Running Compose, applying the schema, and implementing
+`db/connection.py`, `db/migrate.py`, and `scripts/ingest_subjects.py` move to Phase 2.
+
+**Why.** None of it was on the Phase 1 exit path, and nothing in Phase 1 reads or writes
+the database. Phase 2 is the first phase with real consumers — enrollment, sessions,
+events — so the database gets exercised against actual use rather than in isolation.
+Docker was also not installed on the development machine.
+
+**What carries over unchanged.** `migrations/001_phase1_core.sql` as written, including
+the `holdout_never_enrolled` constraint. `ingest_subjects.py` must assert that database
+cohorts match the committed `config/impostor_holdout.json` and never re-derive the
+selection (D-008).

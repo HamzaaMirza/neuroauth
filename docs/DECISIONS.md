@@ -100,6 +100,52 @@ family changes.
 
 ---
 
+### D-004b — Frontal channels carry a second single-session confound: ocular artifact
+
+*(Numbered out of sequence and placed here on purpose: this is the same underlying
+problem as D-004, reached by a different path.)*
+
+**The problem.** The frontal electrodes Fp1, Fp2, AF7 and AF8 sit just above the
+eyes. They pick up electro-oculographic (EOG) activity — blinks and eye movements —
+at amplitudes well above cortical EEG. On subjects 1–10 the median eyes-open 2 s
+window on Fp1 and AF7 is ~300 µV peak-to-peak, against ~135 µV on C3 and Cz (D-015).
+Blink rate, blink amplitude and eye-movement habits are person-specific and stable
+within one sitting. In a single-session dataset they are therefore confounded with
+identity exactly as amplitude offsets are: a model can learn how someone blinked
+during that one recording and get credit for recognizing their brain.
+
+**Why D-004 does not fix it.** Relative band power removes a per-channel gain. EOG
+is not a gain. It changes spectral *shape*, piling power into delta at the frontal
+channels, and relative power preserves shape. The confound passes through D-004
+untouched.
+
+**Why the headline split should partly resist it, and the temporal split won't.**
+The cross-condition model trains on eyes-open, where blinks are frequent, and tests
+on eyes-closed, where they mostly are not (Fp1 median ~146 µV). Blink features
+learned in training are largely absent at test, so leaning on them should *lower*
+the cross-condition score. The within-condition temporal split has blinks on both
+sides and gets no such protection. This is an expectation to check, not a result.
+
+**Decision.** Once the baseline trains, report the share of impurity importance on
+Fp1/Fp2/AF7/AF8 for the eyes-open-trained model, next to the share those four
+channels would carry if importance were uniform (4 of 64 = 6.25%). See
+`channel_importance` and `importance_share`. Per-recording frontal flag rates go to
+`artifacts/quality_flag_rates.csv`.
+
+**If importance concentrates frontally,** that is a README finding in the same
+section as the absolute/relative gap. A frontal-excluded feature variant then gets
+run and reported next to the headline. It is not built until the check says it is
+needed.
+
+**Alternatives.** (a) Drop the frontal channels up front. That discards the channels
+most likely to carry the confound *before measuring it*, and removes the finding.
+(b) Remove EOG with regression or ICA, the standard clinical fix. eegmmidb has no
+dedicated EOG channels (all 64 are scalp EEG), so this would mean ICA with frontal
+channels as a proxy, where choosing which components to remove is itself a judgment
+call. Disproportionate until the check shows a problem.
+
+---
+
 ### D-005 — Welch `nperseg=160` inside a 2 s window
 
 **Decision.** 160 samples per segment with 80 overlap: 1 Hz resolution, roughly three
@@ -143,21 +189,57 @@ permuted training labels and reports the resulting macro-F1 alongside the real o
 and alongside the chance level (1 / n_classes). If the control does not collapse to
 roughly chance, the run aborts instead of writing artifacts.
 
-**Why.** It costs one refit and a few minutes, and it is the only cheap check that
-catches a leaking split before the number is published. A macro-F1 with no chance
-level next to it is also uninterpretable to a reader — for 89 enrollable subjects
-chance is about 0.011, and that context belongs in the same table as the result.
+**Why.** It costs one refit. It catches any path by which the true test labels reach
+the predictions other than through training: test labels leaking into features or
+into the fit, row/label misalignment, metric bugs. A macro-F1 with no chance level
+next to it is also uninterpretable to a reader — for 89 enrollable subjects chance is
+about 0.011, and that context belongs in the same table as the result.
+
+**Pass criterion.** Shuffled-label macro-F1 at most 3× chance
+(`check_shuffled_label_control`). With 89 classes and at least ~15 test windows per
+class, the run-to-run spread of a permuted-label macro-F1 should be a few
+thousandths, so 3× chance (~0.034) sits well above what a clean pipeline produces,
+while a real label leak lands far higher.
+
+**What it cannot catch: the split leak.** A test window that shares samples with a
+train window inherits that train window's label, and after permutation that label is
+random. A model memorizing overlapping windows therefore reads as chance on this
+control while its real score is inflated.
+`test_shuffled_control_cannot_detect_window_overlap_leakage` demonstrates this.
+Window-overlap leakage is ruled out structurally instead, by `assert_no_window_overlap`
+on every split (D-002).
+
+*(An earlier draft of this entry called the control "the only cheap check that catches
+a leaking split." That was wrong for the leak this project worries about most, and is
+recorded here so the claim does not reappear.)*
 
 ---
 
-### D-008 — Impostor holdout fixed at ingest, seeded and nested
+### D-008 — Impostor holdout fixed before any result: seeded, nested, committed
 
 **Decision.** `neuroauth.cohorts.select_impostor_holdout` picks the impostor subjects
-from a seeded permutation of the sorted subject ids, truncated to `n_impostors`. It
-runs during `scripts/ingest_subjects.py`, before any Phase 1 result exists. Phase 1
-trains and evaluates on the enrollable cohort only.
+from a seeded permutation of the sorted subject ids, truncated to `n_impostors`.
+`scripts/select_holdout.py` runs it once and writes `config/impostor_holdout.json`:
+seed, candidate list, both cohorts, a UTC timestamp, and the numpy version. That file
+is committed on its own, with a message marking it pre-results, before any
+identification or verification result exists. Phase 1 trains and evaluates on the
+enrollable cohort only.
 
-Starting values: `seed=20260821`, `n_impostors=20`.
+Values: `seed=20260821`, `n_impostors=20`, candidates = all 109 subjects (D-014).
+
+**The file, not the seed, is the source of truth.** Every consumer loads the list with
+`load_holdout_record`, which checks structure but never re-derives from the seed.
+`scripts/ingest_subjects.py` asserts that database cohorts match the file and aborts on
+any mismatch. numpy does not promise that a seeded permutation stays identical across
+versions, so re-deriving could silently yield a different holdout after an upgrade;
+storing the list rules that out. `write_holdout_record` opens the file in
+exclusive-create mode, so a second run cannot overwrite it.
+
+**Evidence of timing.** A local commit date can be edited, so a commit alone proves
+little. What does: the seed and count were committed in `9cdc613`, before any data
+statistics were computed, and the selection is a deterministic function of them plus
+the numpy version recorded in the file. Pushing the holdout commit to a remote before
+any results commit adds an independent timestamp.
 
 **Alternatives.** Choose the holdout in Phase 2, when the FAR-stability argument that
 determines the right count can actually be made.
@@ -170,12 +252,20 @@ keeps every subject already committed to the holdout and only adds more. The Pha
 decision about how many impostors a stable FAR estimate needs can therefore be made
 on its merits without re-rolling anything.
 
-**Enforcement.** Three layers: the `holdout_never_enrolled` CHECK constraint in
-`migrations/001_phase1_core.sql`, `assert_holdout_excluded` called on every training
-set construction, and `tests/test_cohorts.py`.
+**Enforcement.** Four layers: the committed file, written in exclusive-create mode;
+the `holdout_never_enrolled` CHECK constraint in `migrations/001_phase1_core.sql`;
+`assert_holdout_excluded`, raised explicitly on every training-set construction; and
+`tests/test_cohorts.py`, which includes a check of the committed file itself.
 
-**Selected impostor subjects:** *(recorded here by `scripts/ingest_subjects.py` on
-first run — do not edit by hand)*
+**Selected impostor subjects** (from `config/impostor_holdout.json`, selected
+2026-09-14T14:06:19Z; the file is authoritative if this list ever disagrees with it):
+3, 11, 18, 20, 21, 35, 36, 38, 49, 65, 75, 79, 82, 86, 87, 96, 97, 105, 106, 107.
+
+**Disclosure.** Subject 3 is in the holdout, and its baseline recordings were among
+subjects 1–10 used for aggregate quality-mask statistics (D-015) before selection ran.
+No model was fit and nothing identity-bearing was computed. The selection itself is
+fixed by the seed committed in `9cdc613`, before those statistics existed, so it could
+not have been steered by them.
 
 ---
 
@@ -266,3 +356,41 @@ none exist in the baseline runs. No subject is dropped.
 Five recordings are 9,600 samples (60.0 s) rather than the usual 9,760 (61.0 s):
 S014R01, S051R01, S069R01, S097R02, S109R01. Each yields 59 windows instead of 60.
 The resulting class imbalance is under 2% and is not corrected.
+
+---
+
+### D-015 — Quality mask: 500 µV threshold, reported but not excluded in Phase 1
+
+**Finding.** The textbook 250 µV peak-to-peak threshold flagged 30% of windows on
+subjects 1–10, and it was not detecting clipping:
+
+- eyes-open: the median window on Fp1/AF7 was ~300 µV — ocular activity (D-004b)
+- eyes-closed: O1 reached ~450 µV at the 95th percentile — occipital alpha, i.e. real
+  signal
+- uneven: S009 lost all 60 windows in both runs; S001R02, S003 and S010R02 lost about
+  two-thirds
+
+**Decision.**
+
+1. `QualityConfig.max_peak_to_peak_v` raised to 500 µV. On subjects 1–10 that keeps 90%
+   of eyes-open and 100% of eyes-closed windows, so the mask flags gross artifacts
+   rather than physiology.
+2. In Phase 1, flagged windows are **scored, not excluded**. Every report carries
+   `n_test_not_ok` next to its score.
+3. Per-recording flag rates, including frontal-channel flags, go to
+   `artifacts/quality_flag_rates.csv`.
+
+**Why not exclude.** Excluding flagged windows would have removed S009 from the class
+set entirely and biased evaluation toward clean recordings — inflating exactly the
+number D-002 and D-003 exist to keep honest. Deciding what to do with a low-quality
+window is session logic, and session logic arrives in Phase 2.
+
+**Alternatives.** (a) Keep 250 µV and exclude: rejected above. (b) Per-channel
+thresholds calibrated from the data, e.g. median + k·MAD: the right Phase 2 answer,
+premature while the mask gates nothing. (c) 350 µV: still marks 18% of eyes-open
+windows not-ok.
+
+**Provenance caveat.** The 500 µV figure came from subjects 1–10 before the holdout was
+selected, and subject 3 is in the holdout (D-008). That is acceptable for Phase 1 only
+because the threshold changes no score — nothing is excluded. Phase 2 recalibrates on
+the enrollable cohort only.

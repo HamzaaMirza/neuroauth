@@ -7,11 +7,14 @@ with open-set verification against a claimed identity. Nothing here should ever 
 imported by verification or session code.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
 from sklearn.ensemble import RandomForestClassifier
+
+from neuroauth.models.evaluation import macro_f1
 
 
 @dataclass(frozen=True)
@@ -36,6 +39,15 @@ class BaselineConfig:
     n_jobs: int = -1
 
 
+def _check_design(x: NDArray[np.float64], y: NDArray[np.int64]) -> None:
+    if x.ndim != 2:
+        raise ValueError(f"x must be (n_rows, n_features), got shape {x.shape}")
+    if y.ndim != 1 or y.shape[0] != x.shape[0]:
+        raise ValueError(f"y must be ({x.shape[0]},), got shape {y.shape}")
+    if x.shape[0] == 0:
+        raise ValueError("cannot fit on zero rows")
+
+
 def train_baseline(
     x_train: NDArray[np.float64],
     y_train: NDArray[np.int64],
@@ -53,8 +65,23 @@ def train_baseline(
         A fitted classifier. Not persisted to disk -- Phase 1 retrains on demand,
         and the MLflow model registry arrives in Phase 3. No pickle files in
         folders.
+
+    Raises:
+        ValueError: If x is not 2-D, y does not match its rows, or there are no rows.
     """
-    raise NotImplementedError("TODO(phase-1): fit random forest")
+    x = np.asarray(x_train, dtype=np.float64)
+    y = np.asarray(y_train, dtype=np.int64)
+    _check_design(x, y)
+    model = RandomForestClassifier(
+        n_estimators=config.n_estimators,
+        max_depth=config.max_depth,
+        min_samples_leaf=config.min_samples_leaf,
+        class_weight=config.class_weight,
+        random_state=config.random_state,
+        n_jobs=config.n_jobs,
+    )
+    model.fit(x, y)
+    return model
 
 
 def predict_baseline(
@@ -70,8 +97,16 @@ def predict_baseline(
     Returns:
         (predictions, probabilities) with shapes (n,) and (n, n_classes), the
         probability columns in model.classes_ order.
+
+    Raises:
+        ValueError: If x is not 2-D.
     """
-    raise NotImplementedError("TODO(phase-1): predict")
+    rows = np.asarray(x, dtype=np.float64)
+    if rows.ndim != 2:
+        raise ValueError(f"x must be (n_rows, n_features), got shape {rows.shape}")
+    predictions = np.asarray(model.predict(rows), dtype=np.int64)
+    probabilities = np.asarray(model.predict_proba(rows), dtype=np.float64)
+    return predictions, probabilities
 
 
 def run_shuffled_label_control(
@@ -86,10 +121,18 @@ def run_shuffled_label_control(
 ) -> float:
     """Train on shuffled labels and return the resulting macro-F1.
 
-    The cheapest available insurance against publishing a number that is silently
-    wrong. Permute y_train, refit, and evaluate: macro-F1 must collapse to roughly
-    1 / n_classes. If it does not, the split is leaking and every other number from
-    this run is meaningless.
+    Permute y_train, refit, and score against the true test labels. Macro-F1 must
+    collapse to roughly 1 / n_classes; check_shuffled_label_control enforces this.
+
+    What this catches: any path by which the true test labels reach the predictions
+    other than through the (x_train, y_train) association. That covers test labels
+    leaking into features or into the fit, row/label misalignment, and metric bugs.
+
+    What this cannot catch: window-overlap leakage across the split. A test window
+    that shares samples with a train window inherits that train window's label --
+    and after permutation, that label is random. The leaky model reads as chance
+    here while its real score is inflated. Overlap is ruled out structurally by
+    assert_no_window_overlap instead; see D-007.
 
     Runs on every committed evaluation, not only in tests. Costs one refit.
 
@@ -107,7 +150,35 @@ def run_shuffled_label_control(
     Returns:
         Macro-F1 of the shuffled-label model against the true test labels.
     """
-    raise NotImplementedError("TODO(phase-1): shuffled-label control")
+    shuffled = np.random.default_rng(seed).permutation(np.asarray(y_train, dtype=np.int64))
+    model = train_baseline(x_train, shuffled, config)
+    predictions, _ = predict_baseline(model, x_test)
+    return macro_f1(np.asarray(y_test, dtype=np.int64), predictions, labels)
+
+
+def _name_parts(name: str) -> tuple[str, str, str]:
+    parts = name.split(":")
+    if len(parts) != 3:
+        raise ValueError(f"feature name {name!r} is not in mode:channel:band form")
+    return parts[0], parts[1], parts[2]
+
+
+def _aggregate_importance(
+    model: RandomForestClassifier, feature_names: tuple[str, ...], part: int
+) -> dict[str, float]:
+    importances = np.asarray(model.feature_importances_, dtype=np.float64)
+    if importances.size != len(feature_names):
+        raise ValueError(
+            f"model has {importances.size} features but {len(feature_names)} names were given"
+        )
+    totals: dict[str, float] = {}
+    for name, value in zip(feature_names, importances, strict=True):
+        key = _name_parts(name)[part]
+        totals[key] = totals.get(key, 0.0) + float(value)
+    grand_total = sum(totals.values())
+    if grand_total > 0.0:
+        totals = {key: value / grand_total for key, value in totals.items()}
+    return dict(sorted(totals.items(), key=lambda item: item[1], reverse=True))
 
 
 def band_importance(
@@ -126,9 +197,73 @@ def band_importance(
 
     Args:
         model: A fitted classifier.
-        feature_names: Length n_features, matching the training columns.
+        feature_names: Length n_features, matching the training columns. Under
+            "both" normalization the rel: and abs: columns of a band are summed.
 
     Returns:
         Band name -> summed importance, descending. Sums to 1.0 across bands.
+
+    Raises:
+        ValueError: If feature_names does not match the model or a name is not in
+            mode:channel:band form.
     """
-    raise NotImplementedError("TODO(phase-1): per-band importance aggregation")
+    return _aggregate_importance(model, feature_names, part=2)
+
+
+def channel_importance(
+    model: RandomForestClassifier,
+    feature_names: tuple[str, ...],
+) -> dict[str, float]:
+    """Aggregate impurity-based feature importance per channel.
+
+    Used for the frontal EOG check (D-004b): on the eyes-open-trained model, does
+    importance concentrate on the channels above the eyes? Pair with
+    importance_share for the uniform baseline. The same impurity-importance caveats
+    as band_importance apply; the frontal channels are strongly correlated with each
+    other, which makes their group share more trustworthy than any single channel.
+
+    Args:
+        model: A fitted classifier.
+        feature_names: Length n_features, matching the training columns.
+
+    Returns:
+        Channel name -> summed importance across bands and modes, descending. Sums
+        to 1.0 across channels.
+
+    Raises:
+        ValueError: If feature_names does not match the model or a name is not in
+            mode:channel:band form.
+    """
+    return _aggregate_importance(model, feature_names, part=1)
+
+
+def importance_share(
+    importance: dict[str, float],
+    group: Sequence[str],
+) -> tuple[float, float]:
+    """Share of total importance carried by a group, and the uniform baseline.
+
+    "Concentrates" only means something against a reference. If importance were
+    spread evenly across channels, a group of 4 out of 64 would carry 6.25%.
+
+    Args:
+        importance: Output of channel_importance (or band_importance).
+        group: Keys to sum, e.g. config.FRONTAL_EOG_CHANNELS. Duplicates count once.
+
+    Returns:
+        (share, uniform_share): the fraction of total importance on the group, and
+        the fraction it would carry under uniform importance.
+
+    Raises:
+        ValueError: If the group is empty or names a key absent from importance --
+            usually a spelling mismatch such as "FP1" for "Fp1".
+    """
+    members = set(group)
+    if not members:
+        raise ValueError("group is empty")
+    missing = sorted(members - importance.keys())
+    if missing:
+        raise ValueError(f"not present in importance: {missing}")
+    total = sum(importance.values())
+    share = sum(importance[key] for key in members) / total if total > 0.0 else 0.0
+    return share, len(members) / len(importance)

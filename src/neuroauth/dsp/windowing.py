@@ -7,25 +7,20 @@ from neuroauth.config import WindowConfig
 from neuroauth.dsp.types import Condition, Recording, WindowSet
 
 
-def window_bounds(
-    n_samples: int,
-    window_samples: int,
-    hop_samples: int,
-    drop_partial: bool,
-) -> NDArray[np.int64]:
+def window_bounds(n_samples: int, window_samples: int, hop_samples: int) -> NDArray[np.int64]:
     """Compute window start indices.
 
     Split out from the framing itself so the index arithmetic -- the part that is
     easy to get wrong by one -- can be tested directly.
 
+    Only windows that fit entirely inside the signal are emitted. A trailing
+    remainder shorter than one window is dropped, never zero-padded: padding biases a
+    window's PSD toward low frequencies.
+
     Args:
         n_samples: Length of the signal.
         window_samples: Window length in samples.
         hop_samples: Stride between window starts. Must be at least 1.
-        drop_partial: Exclude a final window that would run past the end. When
-            False, no window is emitted past the end either: a partial window is
-            never zero-padded, since padding biases its PSD toward low frequencies.
-            The flag exists to make that explicit rather than implicit.
 
     Returns:
         (n_windows,) int64 start indices. Empty when the signal is shorter than one
@@ -60,7 +55,6 @@ def frame_signal(
     data: NDArray[np.float64],
     window_samples: int,
     hop_samples: int,
-    drop_partial: bool = True,
 ) -> NDArray[np.float64]:
     """Cut a multichannel signal into overlapping windows.
 
@@ -72,7 +66,6 @@ def frame_signal(
         data: (n_channels, n_samples), volts.
         window_samples: Window length in samples.
         hop_samples: Stride between window starts.
-        drop_partial: See window_bounds.
 
     Returns:
         (n_windows, n_channels, window_samples) float64.
@@ -83,7 +76,7 @@ def frame_signal(
     x = np.asarray(data, dtype=np.float64)
     if x.ndim != 2:
         raise ValueError(f"expected (n_channels, n_samples), got shape {x.shape}")
-    starts = window_bounds(x.shape[1], window_samples, hop_samples, drop_partial)
+    starts = window_bounds(x.shape[1], window_samples, hop_samples)
     return _frames_at(x, starts, window_samples)
 
 
@@ -121,7 +114,7 @@ def _build_window_set(
     if x.shape[0] != len(ch_names):
         raise ValueError(f"data has {x.shape[0]} channels but {len(ch_names)} ch_names")
 
-    starts = window_bounds(x.shape[1], window_samples, hop_samples, config.drop_partial)
+    starts = window_bounds(x.shape[1], window_samples, hop_samples)
     return WindowSet(
         data=_frames_at(x, starts, window_samples),
         sfreq=sfreq,

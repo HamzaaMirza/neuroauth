@@ -1,80 +1,67 @@
 # PROGRESS — NeuroAuth
 
 **Current phase:** 1 — Signal pipeline + identification baseline
-**Status:** `dsp/` implemented and tested. Paused for review before `models/`.
+**Status:** `dsp/`, `cohorts`, and `models/` implemented and tested. Impostor holdout
+selected; its file awaits its own pre-results commit. No model has touched real data.
 **Last updated:** 2026-09-14
 
 ---
 
 ## Where things stand
 
-Dataset verified at the header level for all 218 baseline recordings (D-014).
+- **`dsp/`** (io, preprocess, windowing, features) — implemented, committed in
+  `99230d8`. `drop_partial` since removed.
+- **Quality mask** — peak-to-peak threshold raised to 500 uV; flagged windows are
+  scored, not excluded, in Phase 1 (D-015).
+- **Impostor holdout** — `config/impostor_holdout.json` written 2026-09-14T14:06:19Z:
+  subjects 3, 11, 18, 20, 21, 35, 36, 38, 49, 65, 75, 79, 82, 86, 87, 96, 97, 105, 106,
+  107. The file is the source of truth; nothing re-derives it (D-008). **Not committed
+  yet.**
+- **`models/`** — `splits` (temporal with guard, cross-condition, overlap assertion),
+  `baseline` (RF, shuffled-label control, band/channel importance, importance share),
+  `evaluation` (report, control gate, normalization comparison, artifacts, per-recording
+  quality flag rates). Tested on synthetic data only.
+- **Tests:** 156 (155 pass + the committed-holdout check, which runs once the file
+  exists). mypy strict clean on `dsp`, `config`, `cohorts`, `models`.
 
-`src/neuroauth/dsp/` — `io`, `preprocess`, `windowing`, `features` — is implemented
-to contract. 82 tests pass (including the 4 slow real-data loader tests); the 12
-remaining skips are the `cohorts` and `splits` stubs. mypy strict and ruff are clean.
-On real data the chain runs at roughly 180 ms per 61 s recording and every feature
-value is finite.
-
-MNE is confined to `dsp/io.py` (D-001). One contract error was caught and fixed during
-implementation: band-power integration (D-013).
-
-Not yet implemented: `dsp/pipeline.py`, `config.fingerprint()`, `cohorts.py`,
-everything in `models/` and `db/`, all scripts except `verify_dataset.py`.
+Not yet implemented: `dsp/pipeline.py`, `config.fingerprint()`,
+`scripts/train_baseline.py`, everything in `db/`.
 
 ---
 
 ## Next up
 
-1. **Review checkpoint** — test results and the open questions below.
-2. **Resolve the quality-mask threshold question** before any evaluation is designed
-   around window exclusion.
-3. **Fix the impostor holdout.** Approved design:
-   - `cohorts.py` writes `config/impostor_holdout.json` with seed, subject list, and
-     a UTC timestamp.
-   - That file is committed **on its own**, with a message marking it pre-results.
-   - `ingest_subjects.py` (later, with Docker) **asserts the DB rows match the file**
-     and never re-derives the selection, so seed or library drift cannot silently
-     produce a different holdout.
-   - Paste the list into D-008.
-4. `dsp/pipeline.py` + `config.fingerprint()`
-5. `models/splits.py`, overlap assertion live
-6. `models/baseline.py` + `models/evaluation.py`, shuffled-label control
-7. `scripts/train_baseline.py` — four runs, artifacts committed → exit criteria
+1. **Commit the holdout file on its own** (pre-results), then push if a remote exists.
+   No real-data model run happens before this.
+2. Commit the remaining work.
+3. `dsp/pipeline.py` + `config.fingerprint()`.
+4. `scripts/train_baseline.py`: four runs, shuffled-label gate, holdout loaded from the
+   file and asserted excluded, `quality_flag_rates.csv`, frontal importance share on
+   eyes-open-trained models, band importance.
+5. Review results before writing them up: absolute/relative gap (D-004), frontal share
+   vs 6.25% uniform (D-004b), delta importance (D-005).
+6. README results section; commit artifacts → **exit criteria met**.
 
 **Deferred this weekend:** Docker Compose, `db/`, migrations, `ingest_subjects.py`.
-Docker is not installed and these are off the exit-criteria path.
 
 ---
 
 ## Open questions
 
-- **Quality-mask peak-to-peak threshold (blocking step 6).** The textbook 250 uV
-  default rejects 30% of windows on subjects 1–10, and it is not detecting clipping:
-  - eyes-open: median window peak-to-peak on Fp1/AF7 is ~300 uV — ocular artifact
-  - eyes-closed: O1 p95 is ~450 uV — occipital alpha, i.e. real signal
-  - uneven: S009 loses all 60 windows in both runs; S001R02, S003, S010R02 lose ~2/3
-  - windows ok at 350 uV: 82% open / 99% closed; at 500 uV: 90% / 100%
-
-  If evaluation drops flagged windows, S009 leaves the class set entirely and the
-  cross-condition split loses alpha-heavy eyes-closed windows. Needs a decision on the
-  threshold and on whether Phase 1 evaluation excludes flagged windows at all. If the
-  threshold is recalibrated from data, do it on the enrollable cohort only, after the
-  holdout is committed.
-- **`drop_partial` is a dead flag.** As contracted, both values produce identical
-  output. Remove it from `WindowConfig` and the windowing signatures, or give it a
-  meaning.
-- **Phase 2: filter edge effects on short buffers.** Preprocessing is the same
-  function on both paths, but Phase 1 filters a 61 s recording while a live stream
-  filters a short buffer, and `sosfiltfilt` edge transients differ. D-001 removes
-  code skew, not this. Phase 2 needs a buffering strategy (filter a rolling buffer
-  longer than the window and keep its interior).
-- **Window size.** 2 s. Revisit in Phase 2. Do not lengthen it for spectral
-  resolution (D-005).
+- **Random-split reference run (D-007).** The shuffled-label control cannot detect
+  window-overlap leakage. A deliberately leaky random split, run once and labelled as
+  such, would quantify how much overlap inflates the score — the empirical half of
+  the "my number is lower because" argument. Not built; needs a yes/no.
+- **Frontal-excluded variant (D-004b).** Built only if frontal importance concentrates
+  on the eyes-open-trained model.
+- **Phase 2: filter edge effects on short buffers.** Same preprocessing function on
+  both paths, but `sosfiltfilt` edge transients differ between a 61 s recording and a
+  short live buffer. D-001 removes code skew, not this. Needs a buffering strategy.
+- **Window size.** 2 s. Revisit in Phase 2 (D-005).
 - **Delta band.** ~3 Welch bins. Check `band_importance` after the first fit (D-005).
-- **How many impostor subjects.** Starting at 20; selection is nested, so the count
-  can rise in Phase 2 without re-rolling (D-008).
+- **How many impostor subjects.** 20; nested, so the count can rise in Phase 2 (D-008).
 - **Channel subset.** Not Phase 1. CAR must be part of that experiment's design (D-006).
+- **Lint:** `scripts/verify_dataset.py` has an en dash in a print string (RUF001).
 
 ---
 
@@ -84,6 +71,7 @@ Docker is not installed and these are off the exit-criteria path.
 - Container service choice (ECS Fargate vs App Runner) — Phase 4, gated on WebSocket
   support
 - Threshold values for challenge/revoke — Phase 2, tuned against the DET curve
+- Quality-mask recalibration on the enrollable cohort — Phase 2 (D-015)
 - Alembic — Phase 2, when SQLAlchemy models exist (D-009)
 
 ---
@@ -100,15 +88,21 @@ None for the exit-criteria path. Docker install needed before Phase 1 closes.
 
 ### 2026-09-14
 **Phase:** 1
-**Shipped:** `dsp/io.py`, `dsp/preprocess.py`, `dsp/windowing.py`, `dsp/features.py`
-with tests (82 passing). `src/neuroauth.egg-info/` untracked and gitignored.
-D-013, D-014.
-**Next:** Review, resolve the quality threshold, then commit the holdout file.
-**Notes / decisions:** Band-power integration contract was wrong — fixed with
-interpolated edges (D-013). All 218 baseline recordings load; none dropped (D-014).
-Quality mask at 250 uV flags ocular artifacts and eyes-closed alpha as clipping —
-open question. Holdout design approved: JSON file committed alone pre-results, DB
-ingest asserts against it. Docker deferred.
+**Shipped:** `dsp/` (io, preprocess, windowing, features) with tests; egg-info untracked.
+Then: `drop_partial` removed; quality threshold 250 → 500 uV; `cohorts.py` +
+`scripts/select_holdout.py`; holdout file generated; `models/splits.py`,
+`models/baseline.py`, `models/evaluation.py` with tests. D-004b, D-008 (updated),
+D-013, D-014, D-015; D-007 corrected.
+**Next:** Holdout commit, then `pipeline.py`, `fingerprint()`, `train_baseline.py`.
+**Notes / decisions:** Band-power contract was wrong, fixed (D-013). Quality mask at
+250 uV flagged EOG and eyes-closed alpha as clipping; raised and made report-only
+(D-015). Frontal EOG is a second single-session identity confound that relative power
+does not remove (D-004b). The shuffled-label control cannot detect overlap leakage —
+D-007 claimed it could; corrected, and a test demonstrates the limit.
+`temporal_split` gained a `window_s` argument (onsets can't imply window length).
+`IdentificationReport.n_low_quality_excluded` replaced by `n_test_not_ok`. Holdout
+subject 3 was in the pre-selection quality statistics; disclosed in D-015. User
+commits; never auto-commit.
 
 ### 2026-08-21
 **Phase:** 1

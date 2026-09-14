@@ -16,7 +16,7 @@ from tests.synthetic import CH_NAMES, SFREQ
 
 def test_window_count_at_fifty_percent_overlap(synthetic_recording: Recording) -> None:
     """60 s at 160 Hz, 2 s windows, 50% overlap yields 59 windows."""
-    assert window_bounds(9600, 320, 160, drop_partial=True).size == 59
+    assert window_bounds(9600, 320, 160).size == 59
     windows = window_recording(synthetic_recording, WindowConfig())
     assert windows.data.shape == (59, 64, 320)
 
@@ -24,7 +24,7 @@ def test_window_count_at_fifty_percent_overlap(synthetic_recording: Recording) -
 @pytest.mark.parametrize("n_samples", [320, 321, 479, 480, 481, 9600, 9760])
 def test_no_window_runs_past_the_end(n_samples: int) -> None:
     """Every window fits, hops are uniform, and no further window would have fit."""
-    starts = window_bounds(n_samples, 320, 160, drop_partial=True)
+    starts = window_bounds(n_samples, 320, 160)
     assert starts[0] == 0
     assert np.all(np.diff(starts) == 160)
     assert np.all(starts + 320 <= n_samples)
@@ -38,17 +38,9 @@ def test_partial_window_is_dropped_not_padded() -> None:
     assert np.all(frames == 1.0)
 
 
-def test_drop_partial_false_still_never_pads() -> None:
-    """Documents current contract: the flag does not change output in either mode."""
-    np.testing.assert_array_equal(
-        window_bounds(1000, 320, 160, drop_partial=False),
-        window_bounds(1000, 320, 160, drop_partial=True),
-    )
-
-
 def test_signal_shorter_than_one_window_yields_none() -> None:
     """Returns an empty index array and an empty frame stack rather than raising."""
-    starts = window_bounds(100, 320, 160, drop_partial=True)
+    starts = window_bounds(100, 320, 160)
     assert starts.size == 0
     assert starts.dtype == np.int64
     assert frame_signal(np.zeros((3, 100)), 320, 160).shape == (0, 3, 320)

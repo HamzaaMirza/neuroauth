@@ -7,6 +7,8 @@ right band got the power rather than only that some number came out.
 import numpy as np
 from numpy.typing import NDArray
 
+from neuroauth.dsp.types import Condition, FeatureMatrix, QualityReport
+
 SFREQ = 160.0
 N_CHANNELS = 64
 DURATION_S = 60.0
@@ -84,3 +86,43 @@ def degraded_windows(*, seed: int = 0) -> NDArray[np.float64]:
     windows[:, CLIPPING_CHANNEL, 1::2] = -1e-3
     windows[:, NAN_CHANNEL, 10] = np.nan
     return windows
+
+
+def feature_matrix(
+    *,
+    subject_id: int | None = 1,
+    run: int | None = 1,
+    condition: Condition | None = "eyes_open",
+    n_windows: int = 60,
+    hop_s: float = 1.0,
+    feature_names: tuple[str, ...] = ("rel:C3:alpha", "rel:C4:alpha"),
+    values: NDArray[np.float64] | None = None,
+    window_ok: NDArray[np.bool_] | None = None,
+    channel_ok: NDArray[np.bool_] | None = None,
+    seed: int = 0,
+) -> FeatureMatrix:
+    """A FeatureMatrix for split and evaluation tests, clean unless told otherwise.
+
+    Onsets start at 0 and advance by hop_s. Channels are read from the feature names
+    (the "mode:channel:band" contract), in order of first appearance.
+    """
+    n_channels = len(dict.fromkeys(name.split(":")[1] for name in feature_names))
+    if values is None:
+        values = np.random.default_rng(seed).normal(size=(n_windows, len(feature_names)))
+    if channel_ok is None:
+        channel_ok = np.ones((n_windows, n_channels), dtype=np.bool_)
+    if window_ok is None:
+        window_ok = np.ones(n_windows, dtype=np.bool_)
+    return FeatureMatrix(
+        values=values,
+        feature_names=feature_names,
+        quality=QualityReport(
+            window_ok=window_ok,
+            channel_ok=channel_ok,
+            flags=tuple(() for _ in range(n_windows)),
+        ),
+        onsets_s=np.arange(n_windows, dtype=np.float64) * hop_s,
+        subject_id=subject_id,
+        run=run,
+        condition=condition,
+    )

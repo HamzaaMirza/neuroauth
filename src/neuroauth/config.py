@@ -23,6 +23,11 @@ FeatureConfig.welch_nperseg). That is thin. Check its feature importance once th
 baseline is trained; if it contributes nothing, drop the band and record why.
 """
 
+FRONTAL_EOG_CHANNELS: Final[tuple[str, ...]] = ("Fp1", "Fp2", "AF7", "AF8")
+"""Electrodes directly above the eyes, where blinks and eye movements dominate. On
+eyes-open-trained models, importance concentrating here signals the EOG confound
+(D-004b). Spelled as the loader's standardized 10-10 names."""
+
 Normalization = Literal["relative", "absolute_log", "both"]
 
 
@@ -62,16 +67,16 @@ class WindowConfig:
     Window length is also the time-to-detect floor for an impostor swap, which is a
     Phase 2 metric. Do not lengthen it to buy spectral resolution.
 
+    A trailing remainder shorter than window_s is always dropped, never zero-padded:
+    padding biases a window's PSD toward low frequencies.
+
     Attributes:
         window_s: Window length in seconds.
         overlap: Fraction in [0, 1). 0.5 = 50% overlap.
-        drop_partial: Discard a trailing window shorter than window_s rather than
-            zero-padding it. Padding biases a window's PSD toward low frequencies.
     """
 
     window_s: float = 2.0
     overlap: float = 0.5
-    drop_partial: bool = True
 
 
 @dataclass(frozen=True)
@@ -113,17 +118,23 @@ class FeatureConfig:
 class QualityConfig:
     """Thresholds for the quality mask. Volts throughout.
 
+    In Phase 1 the mask is reported, not used to exclude windows from scoring
+    (D-015). It starts gating session decisions in Phase 2, where it is recalibrated
+    on the enrollable cohort only.
+
     Attributes:
         flat_std_v: A channel whose within-window std is below this is flat (dead
             electrode). 1e-7 V = 0.1 uV.
-        max_peak_to_peak_v: Above this, the channel is clipping or carries a motion
-            artifact. 250e-6 V = 250 uV.
+        max_peak_to_peak_v: Above this, the channel is flagged as carrying a gross
+            artifact. 500e-6 V = 500 uV. The textbook 250 uV flagged 30% of windows
+            on eegmmidb -- ocular activity in eyes-open, occipital alpha in
+            eyes-closed -- rather than clipping (D-015).
         max_bad_channel_fraction: Fraction of bad channels above which the whole
             window is marked not-ok.
     """
 
     flat_std_v: float = 1e-7
-    max_peak_to_peak_v: float = 250e-6
+    max_peak_to_peak_v: float = 500e-6
     max_bad_channel_fraction: float = 0.2
 
 
@@ -135,6 +146,9 @@ class HoldoutConfig:
     nested: raising n_impostors later keeps every previously selected subject and
     only adds more. That means the count can be revised in Phase 2 against a FAR
     stability argument without invalidating the commitment made here.
+
+    These values produced config/impostor_holdout.json. After that file exists it is
+    the source of truth, and nothing re-derives the holdout from these values.
 
     Attributes:
         seed: Fixed. Changing it re-rolls the holdout and invalidates every Phase 2

@@ -199,3 +199,16 @@ def test_summarize_quality_rejects_missing_frontal_channel() -> None:
 def test_summarize_quality_requires_provenance() -> None:
     with pytest.raises(ValueError):
         summarize_quality([feature_matrix(subject_id=None)], frontal_channels=())
+
+
+def test_a_priori_thresholds_are_unchanged() -> None:
+    """Both thresholds were fixed before any model saw real data (D-016).
+
+    If this fails, a threshold was edited. The fix is not updating this test: it is a
+    new DECISIONS.md entry saying why, with results reported under both the old and
+    the new value.
+    """
+    from neuroauth.models.evaluation import CONTROL_MAX_CHANCE_RATIO, MATERIAL_DELTA
+
+    assert CONTROL_MAX_CHANCE_RATIO == 3.0
+    assert MATERIAL_DELTA == 0.05

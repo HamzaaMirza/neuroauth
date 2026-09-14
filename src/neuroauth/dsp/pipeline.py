@@ -1,10 +1,19 @@
-"""End-to-end composition: EDF on disk -> FeatureMatrix in memory."""
+"""End-to-end composition: EDF on disk -> FeatureMatrix in memory.
 
+Composes the public dsp functions and adds nothing of its own, so a feature vector
+produced here is identical to one produced by calling those functions directly.
+"""
+
+import dataclasses
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 
 from neuroauth.config import PipelineConfig
+from neuroauth.dsp.features import extract_features
+from neuroauth.dsp.io import BASELINE_RUNS, load_baseline_recordings
+from neuroauth.dsp.preprocess import preprocess
 from neuroauth.dsp.types import FeatureMatrix, Recording
+from neuroauth.dsp.windowing import window_recording
 
 
 def process_recording(recording: Recording, config: PipelineConfig) -> FeatureMatrix:
@@ -17,7 +26,9 @@ def process_recording(recording: Recording, config: PipelineConfig) -> FeatureMa
     Returns:
         A FeatureMatrix carrying the provenance of the recording.
     """
-    raise NotImplementedError("TODO(phase-1): compose the per-recording pipeline")
+    clean = preprocess(recording.data, recording.sfreq, config.preprocess)
+    windows = window_recording(dataclasses.replace(recording, data=clean), config.window)
+    return extract_features(windows, config.features, config.quality)
 
 
 def iter_features(
@@ -25,7 +36,7 @@ def iter_features(
     data_dir: Path,
     config: PipelineConfig,
     *,
-    runs: Sequence[int] = (1, 2),
+    runs: Sequence[int] = BASELINE_RUNS,
 ) -> Iterator[FeatureMatrix]:
     """Stream FeatureMatrices, one recording at a time.
 
@@ -43,4 +54,5 @@ def iter_features(
     Yields:
         One FeatureMatrix per successfully loaded recording.
     """
-    raise NotImplementedError("TODO(phase-1): streaming feature extraction")
+    for recording in load_baseline_recordings(subjects, data_dir, runs=runs):
+        yield process_recording(recording, config)

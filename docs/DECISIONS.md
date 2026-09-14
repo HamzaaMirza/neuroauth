@@ -196,10 +196,23 @@ next to it is also uninterpretable to a reader — for 89 enrollable subjects ch
 about 0.011, and that context belongs in the same table as the result.
 
 **Pass criterion.** Shuffled-label macro-F1 at most 3× chance
-(`check_shuffled_label_control`). With 89 classes and at least ~15 test windows per
-class, the run-to-run spread of a permuted-label macro-F1 should be a few
-thousandths, so 3× chance (~0.034) sits well above what a clean pipeline produces,
-while a real label leak lands far higher.
+(`check_shuffled_label_control`), fixed a priori (D-016).
+
+The control is noisier than an independent-rows estimate suggests. A forest trained on
+permuted labels still keeps each subject's test windows together, and likely votes much
+of a subject's cluster onto a single random label, so each subject tends to land on its
+own label all-or-nothing. The 5-subject smoke run on 2026-09-14 showed the effect: one
+control read 0.41 against a chance level of 0.20 — inside the 3× ceiling, but twice
+chance. With 89 classes the effect averages over many subjects and should shrink, but a
+clean pipeline can occasionally breach 3×.
+
+If a control fails, the run writes nothing, and the response is to investigate and
+document — including the failing value — not to re-run permutation seeds until one
+passes, and not to raise the ceiling.
+
+*(An earlier version of this paragraph put the spread at "a few thousandths" by
+treating rows as independent. Corrected after the smoke run and before the first full
+run.)*
 
 **What it cannot catch: the split leak.** A test window that shares samples with a
 train window inherits that train window's label, and after permutation that label is
@@ -394,3 +407,59 @@ windows not-ok.
 selected, and subject 3 is in the holdout (D-008). That is acceptable for Phase 1 only
 because the threshold changes no score — nothing is excluded. Phase 2 recalibrates on
 the enrollable cohort only.
+
+---
+
+### D-016 — Evaluation thresholds fixed a priori
+
+**Decision.** Two thresholds were set on 2026-09-14, before any model had been fit on
+real EEG, and are **not to be adjusted after seeing results**:
+
+| Threshold | Value | Constant | What it decides |
+|---|---|---|---|
+| Shuffled-label control ceiling | 3× chance | `CONTROL_MAX_CHANCE_RATIO` | A run whose control exceeds it writes no artifacts (D-007) |
+| Materiality of the absolute–relative gap | 0.05 macro-F1 | `MATERIAL_DELTA` | Above it, the gap is reported as a single-session amplitude confound (D-004) |
+
+**Why a priori.** A threshold chosen after seeing the numbers can be placed to make a
+control pass or a gap look immaterial, and nobody reading the result afterwards could
+tell. Fixing both before the first real-data run is what makes the pass/fail and the
+"material" label mean something.
+
+**Enforcement.** `test_a_priori_thresholds_are_unchanged` pins both values. If it
+fails, the fix is not editing the test. It is a new entry here explaining why the value
+changed, with results reported under both the old and the new value.
+
+The split parameters and seeds in `scripts/train_baseline.py` (train fraction 0.7,
+guard equal to the 2 s window, control seed, leaky-split seed) were likewise fixed
+before the first real-data run, and every run records them in `run_summary.json`.
+
+---
+
+### D-017 — A deliberately leaky random split, run as a labelled demonstration
+
+**Decision.** `train_baseline.py` runs one extra evaluation on a shuffled row split
+(`leaky_random_split`) over the same 50%-overlapping windows, with relative band
+power. It is written to its own artifact, `artifacts/leakage_demonstration.json`,
+labelled "DELIBERATELY LEAKY". It never produces a headline result, never goes through
+`write_report`, and its output fails `assert_no_window_overlap` by design.
+
+**Why.** D-002 argues that a random split over overlapping windows measures
+memorization, and D-007 showed the shuffled-label control cannot see that leak. This
+run turns the argument into a number on real data: the gap between the leaky score and
+the guarded score. That gap is the README's "my number is lower because…", in figures.
+
+**What it is compared against.** The guarded temporal split with the same
+normalization. Both split windows within the same recordings, so the difference is
+whether windows that share samples can straddle the boundary. Not the cross-condition
+split, which also changes brain state and would mix two effects into one gap.
+
+**What the gap includes.** Shared samples, and also plain temporal adjacency —
+neighbouring windows resemble each other even where they share nothing, and the
+guarded split discards those too. The artifact reports the fraction of leaky test
+windows that actually share samples with a training window (expected about 91% at a
+70/30 split, since each window overlaps its two neighbours: 1 − 0.3²), so a reader can
+see how pervasive the overlap is.
+
+**Also recorded.** The shuffled-label control on the leaky split — the real-data
+counterpart of `test_shuffled_control_cannot_detect_window_overlap_leakage`. If D-007
+holds, it reads near chance while the leaky score is inflated.

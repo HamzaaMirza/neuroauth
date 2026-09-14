@@ -27,10 +27,16 @@ from neuroauth.config import FRONTAL_EOG_CHANNELS
 from neuroauth.dsp.types import FeatureMatrix
 
 CONTROL_MAX_CHANCE_RATIO = 3.0
-"""Shuffled-label macro-F1 above this multiple of chance fails the control (D-007)."""
+"""Shuffled-label macro-F1 above this multiple of chance fails the control (D-007).
+
+Set a priori, before any model was fit on real EEG. Not to be adjusted after seeing
+results (D-016)."""
 
 MATERIAL_DELTA = 0.05
-"""Macro-F1 gap between absolute and relative band power treated as material (D-004)."""
+"""Macro-F1 gap between absolute and relative band power treated as material (D-004).
+
+Set a priori, before any model was fit on real EEG. Not to be adjusted after seeing
+results (D-016)."""
 
 QUALITY_REPORT_FILENAME = "quality_flag_rates.csv"
 

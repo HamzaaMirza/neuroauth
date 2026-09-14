@@ -1,46 +1,47 @@
 # PROGRESS — NeuroAuth
 
 **Current phase:** 1 — Signal pipeline + identification baseline
-**Status:** `dsp/`, `cohorts`, and `models/` implemented and tested. Impostor holdout
-selected; its file awaits its own pre-results commit. No model has touched real data.
+**Status:** Phase 1 code complete. A 5-subject smoke run passed end to end on real EEG.
+The full run is next, and needs a clean working tree first: the driver refuses to write
+`artifacts/` from uncommitted code.
 **Last updated:** 2026-09-14
 
 ---
 
 ## Where things stand
 
-- **`dsp/`** (io, preprocess, windowing, features) — implemented, committed in
-  `99230d8`. `drop_partial` since removed.
-- **Quality mask** — peak-to-peak threshold raised to 500 uV; flagged windows are
-  scored, not excluded, in Phase 1 (D-015).
-- **Impostor holdout** — `config/impostor_holdout.json` written 2026-09-14T14:06:19Z:
-  subjects 3, 11, 18, 20, 21, 35, 36, 38, 49, 65, 75, 79, 82, 86, 87, 96, 97, 105, 106,
-  107. The file is the source of truth; nothing re-derives it (D-008). **Not committed
-  yet.**
-- **`models/`** — `splits` (temporal with guard, cross-condition, overlap assertion),
-  `baseline` (RF, shuffled-label control, band/channel importance, importance share),
-  `evaluation` (report, control gate, normalization comparison, artifacts, per-recording
-  quality flag rates). Tested on synthetic data only.
-- **Tests:** 156 (155 pass + the committed-holdout check, which runs once the file
-  exists). mypy strict clean on `dsp`, `config`, `cohorts`, `models`.
-
-Not yet implemented: `dsp/pipeline.py`, `config.fingerprint()`,
-`scripts/train_baseline.py`, everything in `db/`.
+- **Impostor holdout** — `config/impostor_holdout.json`, committed alone in `1f25cd2`
+  and pushed to `origin/main` before any model touched real EEG (D-008).
+- **`dsp/`** — io, preprocess, windowing, features, and now `pipeline.py`.
+- **`config.fingerprint()`** — canonical SHA-256, band order included, stable across
+  processes.
+- **`models/`** — splits (temporal with guard, cross-condition, the deliberately leaky
+  random split, overlap counting), baseline, evaluation. Committed in `a396033` except
+  this session's additions.
+- **`scripts/train_baseline.py`** — four evaluations plus the leakage demonstration.
+  Checked before any EEG loads: the holdout file is in HEAD and unmodified, and writing
+  `artifacts/` requires a clean tree. Every shuffled-label control is gated before any
+  artifact is written. Records git HEAD, a dirty flag, config fingerprints, split
+  parameters, the a priori thresholds, and package versions.
+- **Tests:** 185. mypy strict clean across `src/neuroauth`.
+- **Smoke run** (5 subjects, scratchpad only, 17 s): every artifact produced and
+  rendered. Too few subjects for the numbers to mean anything. One control read 0.41
+  against chance 0.20 — inside the ceiling, but it showed the control is noisier than
+  D-007 first claimed. D-007 was corrected before the full run.
 
 ---
 
 ## Next up
 
-1. **Commit the holdout file on its own** (pre-results), then push if a remote exists.
-   No real-data model run happens before this.
-2. Commit the remaining work.
-3. `dsp/pipeline.py` + `config.fingerprint()`.
-4. `scripts/train_baseline.py`: four runs, shuffled-label gate, holdout loaded from the
-   file and asserted excluded, `quality_flag_rates.csv`, frontal importance share on
-   eyes-open-trained models, band importance.
-5. Review results before writing them up: absolute/relative gap (D-004), frontal share
-   vs 6.25% uniform (D-004b), delta importance (D-005).
-6. README results section; commit artifacts → **exit criteria met**.
+1. **Commit the current work** and push.
+2. **Full run:** `python -m scripts.train_baseline` → `artifacts/`.
+3. **Review before writing anything up:**
+   - every shuffled-label control against its 3× ceiling (D-007, D-016)
+   - absolute vs relative gap against 0.05 (D-004, D-016)
+   - frontal importance share vs 6.25% uniform on the eyes-open models (D-004b)
+   - delta band importance (D-005)
+   - leaky-minus-honest inflation (D-017)
+4. README results section; commit artifacts → **exit criteria met**.
 
 **Deferred this weekend:** Docker Compose, `db/`, migrations, `ingest_subjects.py`.
 
@@ -48,17 +49,15 @@ Not yet implemented: `dsp/pipeline.py`, `config.fingerprint()`,
 
 ## Open questions
 
-- **Random-split reference run (D-007).** The shuffled-label control cannot detect
-  window-overlap leakage. A deliberately leaky random split, run once and labelled as
-  such, would quantify how much overlap inflates the score — the empirical half of
-  the "my number is lower because" argument. Not built; needs a yes/no.
 - **Frontal-excluded variant (D-004b).** Built only if frontal importance concentrates
-  on the eyes-open-trained model.
+  on the eyes-open-trained models.
+- **Control false alarms (D-007).** A clean pipeline can occasionally breach 3× chance.
+  If the full run fails a control: investigate and document, don't re-roll seeds or
+  move the ceiling.
 - **Phase 2: filter edge effects on short buffers.** Same preprocessing function on
   both paths, but `sosfiltfilt` edge transients differ between a 61 s recording and a
-  short live buffer. D-001 removes code skew, not this. Needs a buffering strategy.
+  short live buffer. D-001 removes code skew, not this.
 - **Window size.** 2 s. Revisit in Phase 2 (D-005).
-- **Delta band.** ~3 Welch bins. Check `band_importance` after the first fit (D-005).
 - **How many impostor subjects.** 20; nested, so the count can rise in Phase 2 (D-008).
 - **Channel subset.** Not Phase 1. CAR must be part of that experiment's design (D-006).
 - **Lint:** `scripts/verify_dataset.py` has an en dash in a print string (RUF001).
@@ -88,20 +87,22 @@ None for the exit-criteria path. Docker install needed before Phase 1 closes.
 
 ### 2026-09-14
 **Phase:** 1
-**Shipped:** `dsp/` (io, preprocess, windowing, features) with tests; egg-info untracked.
-Then: `drop_partial` removed; quality threshold 250 → 500 uV; `cohorts.py` +
-`scripts/select_holdout.py`; holdout file generated; `models/splits.py`,
-`models/baseline.py`, `models/evaluation.py` with tests. D-004b, D-008 (updated),
-D-013, D-014, D-015; D-007 corrected.
-**Next:** Holdout commit, then `pipeline.py`, `fingerprint()`, `train_baseline.py`.
+**Shipped:** `dsp/` (io, preprocess, windowing, features, pipeline) with tests;
+egg-info untracked. `drop_partial` removed; quality threshold 250 → 500 uV.
+`cohorts.py`, `scripts/select_holdout.py`, holdout committed alone and pushed.
+`models/splits.py`, `models/baseline.py`, `models/evaluation.py`.
+`config.fingerprint()`. Deliberately leaky split + overlap counting.
+`scripts/train_baseline.py` with holdout-committed and clean-tree preconditions.
+5-subject smoke run. D-004b, D-008 (updated), D-013–D-017; D-007 corrected twice.
+**Next:** Commit, full run, review, README results.
 **Notes / decisions:** Band-power contract was wrong, fixed (D-013). Quality mask at
-250 uV flagged EOG and eyes-closed alpha as clipping; raised and made report-only
-(D-015). Frontal EOG is a second single-session identity confound that relative power
-does not remove (D-004b). The shuffled-label control cannot detect overlap leakage —
-D-007 claimed it could; corrected, and a test demonstrates the limit.
-`temporal_split` gained a `window_s` argument (onsets can't imply window length).
-`IdentificationReport.n_low_quality_excluded` replaced by `n_test_not_ok`. Holdout
-subject 3 was in the pre-selection quality statistics; disclosed in D-015. User
+250 uV flagged EOG and eyes-closed alpha; raised and made report-only (D-015). Frontal
+EOG is a second single-session confound that relative power does not remove (D-004b).
+The shuffled-label control cannot detect overlap leakage (D-007 correction, with a
+synthetic demonstration); a labelled leaky split measures that on real data (D-017).
+Both evaluation thresholds fixed a priori and pinned by a test (D-016). Smoke run
+showed the control is noisier than first estimated; D-007 corrected before the full
+run. Holdout subject 3 was in pre-selection quality statistics; disclosed. User
 commits; never auto-commit.
 
 ### 2026-08-21

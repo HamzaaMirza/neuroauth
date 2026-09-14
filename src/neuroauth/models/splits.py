@@ -2,11 +2,14 @@
 
 Windows overlap by 50%. A random split therefore puts windows that share half their
 samples on both sides of the boundary, and the resulting score measures memorization
-of shared samples rather than subject identity. Every function here splits on
-contiguous time or on whole recordings, never at random.
+of shared samples rather than subject identity. Every split used for a result here
+works on contiguous time or on whole recordings, never at random.
 
 This is why the published macro-F1 will sit below most numbers reported on eegmmidb.
 That is the intended outcome, and the reason is worth stating in the README.
+
+The one exception is leaky_random_split, which exists only to measure that inflation
+and is labelled as a demonstration wherever it is used (D-017).
 
 Integrity checks raise AssertionError explicitly instead of using an `assert`
 statement, so they still run under `python -O`.
@@ -177,6 +180,122 @@ def cross_condition_split(
     return _join(train_parts), _join(test_parts)
 
 
+def leaky_random_split(
+    matrices: list[FeatureMatrix],
+    train_fraction: float,
+    *,
+    seed: int,
+) -> tuple[NDArray[np.int64], NDArray[np.int64]]:
+    """DELIBERATELY LEAKY. A shuffled row split, for the leakage demonstration only.
+
+    Exists to measure what the rest of this module prevents. With 50%-overlapping
+    windows, a random split puts windows that share samples on both sides of the
+    boundary, and the score it produces is inflated by memorizing them. Its output
+    fails assert_no_window_overlap by design. It never produces a headline result,
+    and every artifact built from it is labelled as a demonstration (D-017).
+
+    Args:
+        matrices: One per recording, in a fixed order.
+        train_fraction: Fraction of all rows assigned to train.
+        seed: Seeds the row permutation.
+
+    Returns:
+        (train_idx, test_idx), sorted and disjoint, covering every row.
+
+    Raises:
+        ValueError: If train_fraction is outside (0, 1), or there are fewer than two
+            rows to split.
+    """
+    if not 0.0 < train_fraction < 1.0:
+        raise ValueError(f"train_fraction must be in (0, 1), got {train_fraction}")
+    n_rows = int(_row_offsets(matrices)[-1])
+    if n_rows < 2:
+        raise ValueError(f"need at least 2 rows to split, got {n_rows}")
+    n_train = min(max(round(train_fraction * n_rows), 1), n_rows - 1)
+    order = np.random.default_rng(seed).permutation(n_rows).astype(np.int64)
+    return np.sort(order[:n_train]), np.sort(order[n_train:])
+
+
+def _checked_indices(
+    matrices: list[FeatureMatrix],
+    train_idx: NDArray[np.int64],
+    test_idx: NDArray[np.int64],
+    window_s: float,
+) -> tuple[NDArray[np.int64], NDArray[np.int64], NDArray[np.int64]]:
+    if window_s <= 0.0:
+        raise ValueError(f"window_s must be positive, got {window_s}")
+    offsets = _row_offsets(matrices)
+    n_rows = int(offsets[-1])
+    train = np.asarray(train_idx, dtype=np.int64)
+    test = np.asarray(test_idx, dtype=np.int64)
+    for side, idx in (("train", train), ("test", test)):
+        if idx.size and (int(idx.min()) < 0 or int(idx.max()) >= n_rows):
+            raise AssertionError(f"{side} indices fall outside the {n_rows} available rows")
+    collisions = np.intersect1d(train, test)
+    if collisions.size:
+        raise AssertionError(
+            f"{collisions.size} rows are in both train and test, e.g. {collisions[:5].tolist()}"
+        )
+    return offsets, train, test
+
+
+def _overlapping_test_windows(
+    matrices: list[FeatureMatrix],
+    train_idx: NDArray[np.int64],
+    test_idx: NDArray[np.int64],
+    window_s: float,
+) -> list[tuple[int, NDArray[np.float64], NDArray[np.float64]]]:
+    """Per recording with overlap: (index, overlapping test onsets, gap to nearest train)."""
+    offsets, train, test = _checked_indices(matrices, train_idx, test_idx, window_s)
+    train_recording = np.searchsorted(offsets, train, side="right") - 1
+    test_recording = np.searchsorted(offsets, test, side="right") - 1
+
+    found: list[tuple[int, NDArray[np.float64], NDArray[np.float64]]] = []
+    for k, matrix in enumerate(matrices):
+        train_onsets = np.sort(matrix.onsets_s[train[train_recording == k] - offsets[k]])
+        test_onsets = matrix.onsets_s[test[test_recording == k] - offsets[k]]
+        if train_onsets.size == 0 or test_onsets.size == 0:
+            continue
+        position = np.searchsorted(train_onsets, test_onsets)
+        before = train_onsets[np.clip(position - 1, 0, train_onsets.size - 1)]
+        after = train_onsets[np.clip(position, 0, train_onsets.size - 1)]
+        gap = np.minimum(np.abs(test_onsets - before), np.abs(test_onsets - after))
+        overlapping = gap < window_s - _ONSET_TOLERANCE_S
+        if overlapping.any():
+            found.append((k, test_onsets[overlapping], gap[overlapping]))
+    return found
+
+
+def count_overlapping_test_windows(
+    matrices: list[FeatureMatrix],
+    train_idx: NDArray[np.int64],
+    test_idx: NDArray[np.int64],
+    window_s: float,
+) -> int:
+    """Count test windows that share samples with at least one train window.
+
+    Zero for every split used for a result (assert_no_window_overlap enforces it).
+    Used to report how pervasive the overlap is in the leakage demonstration.
+
+    Args:
+        matrices: The matrices the indices refer to.
+        train_idx: Row indices.
+        test_idx: Row indices.
+        window_s: Window length in seconds.
+
+    Returns:
+        The number of affected test windows.
+
+    Raises:
+        ValueError: If window_s is not positive.
+        AssertionError: On an out-of-range index, or an index present on both sides.
+    """
+    return sum(
+        onsets.size
+        for _, onsets, _ in _overlapping_test_windows(matrices, train_idx, test_idx, window_s)
+    )
+
+
 def assert_no_window_overlap(
     matrices: list[FeatureMatrix],
     train_idx: NDArray[np.int64],
@@ -202,44 +321,17 @@ def assert_no_window_overlap(
         ValueError: If window_s is not positive.
         AssertionError: On an out-of-range index, any index present on both sides, or
             any pair of windows from the same recording whose time spans intersect.
-            The message names the offending recording and onsets.
+            The message names the offending recording and onset.
     """
-    if window_s <= 0.0:
-        raise ValueError(f"window_s must be positive, got {window_s}")
-
-    offsets = _row_offsets(matrices)
-    n_rows = int(offsets[-1])
-    train = np.asarray(train_idx, dtype=np.int64)
-    test = np.asarray(test_idx, dtype=np.int64)
-    for side, idx in (("train", train), ("test", test)):
-        if idx.size and (int(idx.min()) < 0 or int(idx.max()) >= n_rows):
-            raise AssertionError(f"{side} indices fall outside the {n_rows} available rows")
-
-    collisions = np.intersect1d(train, test)
-    if collisions.size:
+    found = _overlapping_test_windows(matrices, train_idx, test_idx, window_s)
+    if found:
+        k, onsets, gaps = found[0]
+        total = sum(recording_onsets.size for _, recording_onsets, _ in found)
         raise AssertionError(
-            f"{collisions.size} rows are in both train and test, e.g. {collisions[:5].tolist()}"
+            f"{_describe(matrices[k], k)}: test window at {onsets[0]:.3f} s shares samples "
+            f"with a train window {gaps[0]:.3f} s away (window is {window_s} s); {total} "
+            f"test windows affected across {len(found)} recordings"
         )
-
-    train_recording = np.searchsorted(offsets, train, side="right") - 1
-    test_recording = np.searchsorted(offsets, test, side="right") - 1
-    for k, matrix in enumerate(matrices):
-        train_onsets = np.sort(matrix.onsets_s[train[train_recording == k] - offsets[k]])
-        test_onsets = matrix.onsets_s[test[test_recording == k] - offsets[k]]
-        if train_onsets.size == 0 or test_onsets.size == 0:
-            continue
-        position = np.searchsorted(train_onsets, test_onsets)
-        before = train_onsets[np.clip(position - 1, 0, train_onsets.size - 1)]
-        after = train_onsets[np.clip(position, 0, train_onsets.size - 1)]
-        gap = np.minimum(np.abs(test_onsets - before), np.abs(test_onsets - after))
-        overlapping = np.flatnonzero(gap < window_s - _ONSET_TOLERANCE_S)
-        if overlapping.size:
-            j = int(overlapping[0])
-            raise AssertionError(
-                f"{_describe(matrix, k)}: test window at {test_onsets[j]:.3f} s shares "
-                f"samples with a train window {gap[j]:.3f} s away (window is {window_s} s); "
-                f"{overlapping.size} test windows affected"
-            )
 
 
 def concatenate(

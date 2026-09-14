@@ -5,6 +5,9 @@ session row records the config that produced it, so a stored score can always be
 traced back to the exact transform that generated it.
 """
 
+import dataclasses
+import hashlib
+import json
 from dataclasses import dataclass, field
 from typing import Final, Literal
 
@@ -177,7 +180,30 @@ class PipelineConfig:
         exact transform that produced it. Must be stable across processes and Python
         versions, so it cannot use the built-in hash().
 
+        The config is serialized canonically -- dataclass fields keyed by name, dicts
+        kept as ordered [key, value] pairs, floats in Python's shortest round-trip
+        form -- and hashed with SHA-256. Band order is deliberately part of the
+        fingerprint: it fixes feature column order, so two configs listing the same
+        bands in a different order produce incompatible matrices and must not share
+        a fingerprint.
+
         Returns:
-            A short hex digest.
+            The first 16 hex characters of the SHA-256 digest.
         """
-        raise NotImplementedError("TODO(phase-1): stable config fingerprint")
+        canonical = {"fingerprint_version": _FINGERPRINT_VERSION, "config": _canonical(self)}
+        encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]
+
+
+_FINGERPRINT_VERSION = 1
+"""Bump if the serialization changes, so old and new fingerprints can never collide."""
+
+
+def _canonical(value: object) -> object:
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {f.name: _canonical(getattr(value, f.name)) for f in dataclasses.fields(value)}
+    if isinstance(value, dict):
+        return [[str(key), _canonical(item)] for key, item in value.items()]
+    if isinstance(value, tuple | list):
+        return [_canonical(item) for item in value]
+    return value

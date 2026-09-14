@@ -6,6 +6,7 @@ new array of the same shape and dtype. Inputs are never mutated.
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy.signal import butter, filtfilt, iirnotch, sosfiltfilt
 
 from neuroauth.config import PreprocessConfig
 
@@ -35,9 +36,20 @@ def bandpass(
         (n_channels, n_samples) filtered copy.
 
     Raises:
-        ValueError: If the band is invalid or high_hz is at or above Nyquist.
+        ValueError: If the band is invalid, high_hz is at or above Nyquist, or order
+            is below 1.
     """
-    raise NotImplementedError("TODO(phase-1): sos butterworth bandpass")
+    nyquist = sfreq / 2.0
+    if not 0.0 < low_hz < high_hz < nyquist:
+        raise ValueError(
+            f"need 0 < low_hz < high_hz < Nyquist ({nyquist} Hz), got {low_hz}-{high_hz} Hz"
+        )
+    if order < 1:
+        raise ValueError(f"order must be at least 1, got {order}")
+
+    sos = butter(order, [low_hz, high_hz], btype="bandpass", fs=sfreq, output="sos")
+    filtered: NDArray[np.float64] = sosfiltfilt(sos, np.asarray(data, dtype=np.float64), axis=-1)
+    return filtered
 
 
 def notch(
@@ -59,8 +71,24 @@ def notch(
 
     Returns:
         (n_channels, n_samples) filtered copy.
+
+    Raises:
+        ValueError: If freq_hz or q is not positive, or n_harmonics is below 1.
     """
-    raise NotImplementedError("TODO(phase-1): iirnotch + filtfilt")
+    if freq_hz <= 0.0 or q <= 0.0:
+        raise ValueError(f"freq_hz and q must be positive, got {freq_hz} and {q}")
+    if n_harmonics < 1:
+        raise ValueError(f"n_harmonics must be at least 1, got {n_harmonics}")
+
+    nyquist = sfreq / 2.0
+    filtered: NDArray[np.float64] = np.array(data, dtype=np.float64, copy=True)
+    for harmonic in range(1, n_harmonics + 1):
+        target_hz = harmonic * freq_hz
+        if target_hz >= nyquist:
+            break
+        b, a = iirnotch(target_hz, q, fs=sfreq)
+        filtered = filtfilt(b, a, filtered, axis=-1)
+    return filtered
 
 
 def common_average_reference(data: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -73,7 +101,9 @@ def common_average_reference(data: NDArray[np.float64]) -> NDArray[np.float64]:
         (n_channels, n_samples) re-referenced copy. Rank drops by one; the
         channel-mean signal is no longer recoverable.
     """
-    raise NotImplementedError("TODO(phase-1): common average reference")
+    x = np.asarray(data, dtype=np.float64)
+    referenced: NDArray[np.float64] = x - x.mean(axis=0, keepdims=True)
+    return referenced
 
 
 def preprocess(
@@ -94,5 +124,16 @@ def preprocess(
 
     Returns:
         (n_channels, n_samples) preprocessed copy.
+
+    Raises:
+        ValueError: If data is not 2-D, or any filter setting is invalid.
     """
-    raise NotImplementedError("TODO(phase-1): compose notch -> bandpass -> car")
+    x = np.asarray(data, dtype=np.float64)
+    if x.ndim != 2:
+        raise ValueError(f"expected (n_channels, n_samples), got shape {x.shape}")
+
+    out = notch(x, sfreq, config.notch_freq, config.notch_q, config.notch_harmonics)
+    out = bandpass(out, sfreq, config.bandpass_low, config.bandpass_high, config.bandpass_order)
+    if config.common_average_reference:
+        out = common_average_reference(out)
+    return out

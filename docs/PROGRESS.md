@@ -1,56 +1,80 @@
 # PROGRESS — NeuroAuth
 
 **Current phase:** 1 — Signal pipeline + identification baseline
-**Status:** Contracts approved and scaffolded. No function bodies written yet.
-**Last updated:** 2026-08-21
+**Status:** `dsp/` implemented and tested. Paused for review before `models/`.
+**Last updated:** 2026-09-14
 
 ---
 
 ## Where things stand
 
-Dataset verified: 109 subjects, 64 channels at 160 Hz confirmed on subject 1.
-`scripts/verify_dataset.py` works.
+Dataset verified at the header level for all 218 baseline recordings (D-014).
 
-Phase 1 contracts are reviewed, amended, and scaffolded to disk. Every function is
-signature + type hints + docstring with a `raise NotImplementedError` body. Postgres
-schema, Docker Compose, pyproject, and the test skeleton are in place.
-`docs/DECISIONS.md` has twelve entries covering every non-obvious Phase 1 choice.
+`src/neuroauth/dsp/` — `io`, `preprocess`, `windowing`, `features` — is implemented
+to contract. 82 tests pass (including the 4 slow real-data loader tests); the 12
+remaining skips are the `cohorts` and `splits` stubs. mypy strict and ruff are clean.
+On real data the chain runs at roughly 180 ms per 61 s recording and every feature
+value is finite.
 
-Structural decision that shapes everything downstream: **MNE is confined to
-`src/neuroauth/dsp/io.py`.** Preprocessing, windowing, and features are numpy in /
-numpy out, so the identical transform runs over the Phase 2 WebSocket stream where no
-MNE `Raw` object exists. See D-001.
+MNE is confined to `dsp/io.py` (D-001). One contract error was caught and fixed during
+implementation: band-power integration (D-013).
+
+Not yet implemented: `dsp/pipeline.py`, `config.fingerprint()`, `cohorts.py`,
+everything in `models/` and `db/`, all scripts except `verify_dataset.py`.
 
 ---
 
 ## Next up
 
-1. `pip install -e ".[dev]"` — dev deps are not yet in the venv
-2. Implement `dsp/io.py`, `dsp/preprocess.py`, `dsp/windowing.py`, `dsp/features.py`
-3. Implement `cohorts.py` and run `scripts/ingest_subjects.py` — **fixes the impostor
-   holdout before any result is looked at**; paste the subject list into D-008
-4. Implement `models/splits.py` with the overlap assertion live
-5. Implement `models/baseline.py` and `models/evaluation.py`
-6. Fill in the test suite (currently function names + docstrings, all skipped)
-7. Run `scripts/train_baseline.py` — four runs, artifacts committed
+1. **Review checkpoint** — test results and the open questions below.
+2. **Resolve the quality-mask threshold question** before any evaluation is designed
+   around window exclusion.
+3. **Fix the impostor holdout.** Approved design:
+   - `cohorts.py` writes `config/impostor_holdout.json` with seed, subject list, and
+     a UTC timestamp.
+   - That file is committed **on its own**, with a message marking it pre-results.
+   - `ingest_subjects.py` (later, with Docker) **asserts the DB rows match the file**
+     and never re-derives the selection, so seed or library drift cannot silently
+     produce a different holdout.
+   - Paste the list into D-008.
+4. `dsp/pipeline.py` + `config.fingerprint()`
+5. `models/splits.py`, overlap assertion live
+6. `models/baseline.py` + `models/evaluation.py`, shuffled-label control
+7. `scripts/train_baseline.py` — four runs, artifacts committed → exit criteria
+
+**Deferred this weekend:** Docker Compose, `db/`, migrations, `ingest_subjects.py`.
+Docker is not installed and these are off the exit-criteria path.
 
 ---
 
 ## Open questions
 
-- **Window size.** 2 s. Shorter reduces time-to-detect for impostor swaps but adds
-  noise. Revisit with data in Phase 2. Do not lengthen it to buy spectral resolution
-  (D-005).
-- **Delta band.** Roughly three Welch bins at 1 Hz resolution — thin. Check
-  `band_importance` after the first fit; drop the band and record why if it
-  contributes nothing (D-005).
-- **How many impostor subjects.** Starting at 20 of 109. The selection is a truncated
-  seeded permutation, so it is *nested*: raising the count in Phase 2 keeps every
-  subject already committed and only adds more. The count can be decided on a FAR
-  stability argument without re-rolling anything (D-008).
-- **Channel subset.** 64 available. DEAP work showed ~1.85pp loss from 32 to 8. Not a
-  Phase 1 concern — and if it happens, the CAR flag must be part of that experiment's
-  design, not a fixed setting (D-006).
+- **Quality-mask peak-to-peak threshold (blocking step 6).** The textbook 250 uV
+  default rejects 30% of windows on subjects 1–10, and it is not detecting clipping:
+  - eyes-open: median window peak-to-peak on Fp1/AF7 is ~300 uV — ocular artifact
+  - eyes-closed: O1 p95 is ~450 uV — occipital alpha, i.e. real signal
+  - uneven: S009 loses all 60 windows in both runs; S001R02, S003, S010R02 lose ~2/3
+  - windows ok at 350 uV: 82% open / 99% closed; at 500 uV: 90% / 100%
+
+  If evaluation drops flagged windows, S009 leaves the class set entirely and the
+  cross-condition split loses alpha-heavy eyes-closed windows. Needs a decision on the
+  threshold and on whether Phase 1 evaluation excludes flagged windows at all. If the
+  threshold is recalibrated from data, do it on the enrollable cohort only, after the
+  holdout is committed.
+- **`drop_partial` is a dead flag.** As contracted, both values produce identical
+  output. Remove it from `WindowConfig` and the windowing signatures, or give it a
+  meaning.
+- **Phase 2: filter edge effects on short buffers.** Preprocessing is the same
+  function on both paths, but Phase 1 filters a 61 s recording while a live stream
+  filters a short buffer, and `sosfiltfilt` edge transients differ. D-001 removes
+  code skew, not this. Phase 2 needs a buffering strategy (filter a rolling buffer
+  longer than the window and keep its interior).
+- **Window size.** 2 s. Revisit in Phase 2. Do not lengthen it for spectral
+  resolution (D-005).
+- **Delta band.** ~3 Welch bins. Check `band_importance` after the first fit (D-005).
+- **How many impostor subjects.** Starting at 20; selection is nested, so the count
+  can rise in Phase 2 without re-rolling (D-008).
+- **Channel subset.** Not Phase 1. CAR must be part of that experiment's design (D-006).
 
 ---
 
@@ -60,20 +84,31 @@ MNE `Raw` object exists. See D-001.
 - Container service choice (ECS Fargate vs App Runner) — Phase 4, gated on WebSocket
   support
 - Threshold values for challenge/revoke — Phase 2, tuned against the DET curve
-- Alembic — Phase 2, when SQLAlchemy models exist for it to autogenerate against
-  (D-009)
+- Alembic — Phase 2, when SQLAlchemy models exist (D-009)
 
 ---
 
 ## Blockers
 
-None.
+None for the exit-criteria path. Docker install needed before Phase 1 closes.
 
 ---
 
 ## Session log
 
 <!-- Append one entry per session. Newest at top. Keep entries short. -->
+
+### 2026-09-14
+**Phase:** 1
+**Shipped:** `dsp/io.py`, `dsp/preprocess.py`, `dsp/windowing.py`, `dsp/features.py`
+with tests (82 passing). `src/neuroauth.egg-info/` untracked and gitignored.
+D-013, D-014.
+**Next:** Review, resolve the quality threshold, then commit the holdout file.
+**Notes / decisions:** Band-power integration contract was wrong — fixed with
+interpolated edges (D-013). All 218 baseline recordings load; none dropped (D-014).
+Quality mask at 250 uV flags ocular artifacts and eyes-closed alpha as clipping —
+open question. Holdout design approved: JSON file committed alone pre-results, DB
+ingest asserts against it. Docker deferred.
 
 ### 2026-08-21
 **Phase:** 1

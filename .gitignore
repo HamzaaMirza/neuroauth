@@ -5,3 +5,4 @@ __pycache__/
 .env
 .cache/
 artifacts/*.npz
+*.egg-info/

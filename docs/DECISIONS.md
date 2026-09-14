@@ -225,3 +225,44 @@ and the chance level. There is no accuracy field and none will be added.
 **Why.** Hard rule 2. Making it structurally impossible to report is stronger than a
 convention, and Phase 1's closed-set framing is exactly where the temptation would
 otherwise arise.
+
+---
+
+### D-013 — Band power integrates exactly [low, high], with interpolated edges
+
+**Decision.** `band_powers` inserts linearly interpolated PSD values at each band's
+two edge frequencies, then applies the trapezoid rule over exactly `[low_hz,
+high_hz]`.
+
+**Alternatives.** (a) Sum the PSD bins inside the band. (b) Trapezoid over only the
+bins falling in `[low_hz, high_hz)` — which is what the original contract described.
+(c) Mean PSD over the band's bins, as many EEG pipelines do.
+
+**Why rejected.** (b) silently drops one bin-width from every band. At the default
+1 Hz resolution delta integrates 1–3 Hz instead of 1–4 Hz. For a flat spectrum the
+shortfall is 33% delta, 25% theta, 20% alpha, 6% beta, 5% gamma — biased against
+exactly the low bands, which then distorts relative power toward high bands. The
+shortfall also changes with `welch_nperseg`, so retuning Welch would quietly change
+every feature. (a) has the same edge problem plus a dependence on bin width. (c) is
+resolution-stable but either double-counts the bin shared by adjacent bands or leaves
+a gap, so bands don't tile.
+
+**What the chosen method guarantees, and the tests that hold it:** the five default
+bands sum to the 1–50 Hz integral to 1e-12 (`test_bands_tile_without_gaps`), and
+broadband band power agrees within 5% between `nperseg=160` and `nperseg=320`
+(`test_band_power_is_resolution_invariant`).
+
+*(The original contract claimed resolution invariance while specifying method (b),
+which cannot deliver it. Caught during implementation.)*
+
+---
+
+### D-014 — Dataset structural pass: all 218 baseline recordings are usable
+
+**Finding.** Every subject's R01 and R02 load at 160 Hz with 64 channels. The
+loader's skip path and `verify_dataset.py` both anticipated irregular recordings;
+none exist in the baseline runs. No subject is dropped.
+
+Five recordings are 9,600 samples (60.0 s) rather than the usual 9,760 (61.0 s):
+S014R01, S051R01, S069R01, S097R02, S109R01. Each yields 59 windows instead of 60.
+The resulting class imbalance is under 2% and is not corrected.

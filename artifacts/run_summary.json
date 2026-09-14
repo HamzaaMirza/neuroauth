@@ -1,5 +1,5 @@
 {
-  "git_head": "b3450bfc23c43e390c6632053600db82884dd8cb",
+  "git_head": "fa9825000baf46c0ec6858d0f4660c9982dbdbbf",
   "git_dirty": false,
   "holdout_record": {
     "path": "config/impostor_holdout.json",
@@ -83,6 +83,20 @@
     "leaky_shuffled_label_macro_f1": 0.011281381128293305,
     "leaky_fraction_sharing_samples": 0.8994692475803934
   },
+  "emg_ablation": {
+    "without_gamma": {
+      "macro_f1": 0.26257319810035507,
+      "shuffled_label_macro_f1": 0.009102501435594552,
+      "drop_headline_minus_ablated": 0.1158774530170214,
+      "material": true
+    },
+    "without_temporal_channels": {
+      "macro_f1": 0.30016548292764356,
+      "shuffled_label_macro_f1": 0.00742906508236777,
+      "drop_headline_minus_ablated": 0.07828516818973291,
+      "material": true
+    }
+  },
   "n_subjects_evaluated": 89,
   "n_subjects_impostor_holdout": 20,
   "config_fingerprints": {
@@ -108,6 +122,7 @@
   },
   "a_priori_thresholds": {
     "control_max_chance_ratio": 3.0,
-    "material_delta": 0.05
+    "material_delta": 0.05,
+    "ablation_material_drop": 0.05
   }
 }

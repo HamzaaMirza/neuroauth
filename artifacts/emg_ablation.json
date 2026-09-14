@@ -1,0 +1,72 @@
+{
+  "what_this_is": "Ablations of the headline model, each removing features where scalp muscle activity (EMG) concentrates. See docs/DECISIONS.md D-018.",
+  "framing": "Each drop bounds the contribution of information unique to the removed features; it does not decompose it. Gamma at temporal sites contains both muscle and neural activity, and scalp EEG cannot separate them.",
+  "headline": {
+    "normalization": "relative",
+    "split_kind": "cross_condition",
+    "macro_f1": 0.37845065111737647
+  },
+  "ablations": {
+    "without_gamma": {
+      "removed": "the gamma band (30-50 Hz) at every channel, with relative power renormalized over 1-30 Hz",
+      "headline_macro_f1": 0.37845065111737647,
+      "ablated_macro_f1": 0.26257319810035507,
+      "drop_headline_minus_ablated": 0.1158774530170214,
+      "material": true,
+      "material_drop": 0.05,
+      "interpretation": "Removing the gamma band (30-50 Hz) at every channel, with relative power renormalized over 1-30 Hz lowers macro-F1 by 0.116 (0.378 to 0.263), above the 0.05 materiality threshold: the headline depends on information unique to those features. They carry both muscle and neural activity, which scalp EEG cannot separate, so 0.116 bounds their combined contribution from above and does not say how much of it is EMG.",
+      "scope": "The bound covers only information unique to the removed features. Muscle activity that remains in the retained features, and anything the model recovers from features correlated with the removed ones, is not bounded by this check.",
+      "shuffled_label_macro_f1": 0.009102501435594552,
+      "chance_level": 0.011235955056179775,
+      "n_features": 256,
+      "config_fingerprint": "6fbfa48467d609ee",
+      "band_importance": {
+        "beta": 0.4013563600154312,
+        "alpha": 0.20958147662442353,
+        "delta": 0.2062869662866108,
+        "theta": 0.18277519707353446
+      },
+      "top_channels": {
+        "T10": 0.03176618610981032,
+        "T8": 0.031033862558814466,
+        "T9": 0.0289839376437049,
+        "T7": 0.027088379885795443,
+        "Iz": 0.026930254692684705,
+        "FT8": 0.02561864920424023,
+        "TP8": 0.0251511170579853,
+        "AF7": 0.023524486377008404
+      }
+    },
+    "without_temporal_channels": {
+      "removed": "every band at the lateral temporal sites FT7, FT8, T7, T8, TP7, TP8, T9, T10",
+      "headline_macro_f1": 0.37845065111737647,
+      "ablated_macro_f1": 0.30016548292764356,
+      "drop_headline_minus_ablated": 0.07828516818973291,
+      "material": true,
+      "material_drop": 0.05,
+      "interpretation": "Removing every band at the lateral temporal sites FT7, FT8, T7, T8, TP7, TP8, T9, T10 lowers macro-F1 by 0.078 (0.378 to 0.300), above the 0.05 materiality threshold: the headline depends on information unique to those features. They carry both muscle and neural activity, which scalp EEG cannot separate, so 0.078 bounds their combined contribution from above and does not say how much of it is EMG.",
+      "scope": "The bound covers only information unique to the removed features. Muscle activity that remains in the retained features, and anything the model recovers from features correlated with the removed ones, is not bounded by this check.",
+      "shuffled_label_macro_f1": 0.00742906508236777,
+      "chance_level": 0.011235955056179775,
+      "n_features": 280,
+      "config_fingerprint": "3d3c06755c838642",
+      "band_importance": {
+        "gamma": 0.3822935394500457,
+        "beta": 0.1949604054166739,
+        "alpha": 0.1497299807933501,
+        "delta": 0.14028539738054863,
+        "theta": 0.1327306769593818
+      },
+      "top_channels": {
+        "Iz": 0.03996857278067665,
+        "O1": 0.02704693610391146,
+        "C6": 0.02598846088392319,
+        "AF8": 0.02594742429286,
+        "AF7": 0.025812407871580702,
+        "F6": 0.025045470119936734,
+        "C5": 0.024563067030878676,
+        "F7": 0.024036488529890005
+      }
+    }
+  }
+}

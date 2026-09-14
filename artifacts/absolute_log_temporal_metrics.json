@@ -1,0 +1,14 @@
+{
+  "split_kind": "temporal",
+  "normalization": "absolute_log",
+  "macro_f1": 0.9558348647777936,
+  "chance_level": 0.011235955056179775,
+  "shuffled_label_macro_f1": 0.014906008743944764,
+  "n_classes": 89,
+  "n_train": 7650,
+  "n_test": 2670,
+  "n_test_not_ok": 72,
+  "n_subjects_enrollable": 89,
+  "n_subjects_impostor_holdout": 20,
+  "config_fingerprint": "be030ad69d2fd7a3"
+}

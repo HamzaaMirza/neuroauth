@@ -1,0 +1,18 @@
+{
+  "cross_condition": {
+    "split_kind": "cross_condition",
+    "relative_macro_f1": 0.37845065111737647,
+    "absolute_log_macro_f1": 0.5971913827535558,
+    "delta_absolute_minus_relative": 0.2187407316361793,
+    "material_delta": 0.05,
+    "interpretation": "Absolute band power scores 0.219 macro-F1 higher than relative on the cross-condition split. eegmmidb is single-session, so this gap is consistent with recording-level amplitude confounds (impedance, cap placement, amplifier gain) rather than identity information."
+  },
+  "temporal": {
+    "split_kind": "temporal",
+    "relative_macro_f1": 0.8456512500668099,
+    "absolute_log_macro_f1": 0.9558348647777936,
+    "delta_absolute_minus_relative": 0.1101836147109837,
+    "material_delta": 0.05,
+    "interpretation": "Absolute band power scores 0.110 macro-F1 higher than relative on the temporal split. eegmmidb is single-session, so this gap is consistent with recording-level amplitude confounds (impedance, cap placement, amplifier gain) rather than identity information."
+  }
+}

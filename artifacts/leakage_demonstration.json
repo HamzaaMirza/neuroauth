@@ -1,0 +1,19 @@
+{
+  "label": "DELIBERATELY LEAKY SPLIT -- demonstration only, not a result",
+  "what_this_is": "A shuffled row split over 50%-overlapping windows, run to measure what the guarded splits prevent. Its test windows share samples with training windows by construction. See docs/DECISIONS.md D-017.",
+  "normalization": "relative",
+  "honest_split": "temporal, guard 2 s, no shared samples",
+  "honest_macro_f1": 0.8456512500668099,
+  "leaky_macro_f1": 0.9057283937423972,
+  "inflation_leaky_minus_honest": 0.06007714367558736,
+  "chance_level": 0.011235955056179775,
+  "leaky_shuffled_label_macro_f1": 0.011281381128293305,
+  "leaky_n_train": 7473,
+  "leaky_n_test": 3203,
+  "leaky_test_windows_sharing_samples_with_train": 2881,
+  "leaky_fraction_sharing_samples": 0.8994692475803934,
+  "train_fraction": 0.7,
+  "seed": 20260915,
+  "config_fingerprint": "3d3c06755c838642",
+  "interpretation": "A random split over overlapping windows scores 0.906 macro-F1, against 0.846 for the guarded temporal split on the same recordings: an inflation of 0.060. 90% of the random split's test windows share samples with a training window. The shuffled-label control on the random split reads 0.011 (chance 0.011)."
+}

@@ -1,0 +1,14 @@
+{
+  "split_kind": "cross_condition",
+  "normalization": "relative",
+  "macro_f1": 0.37845065111737647,
+  "chance_level": 0.011235955056179775,
+  "shuffled_label_macro_f1": 0.009009933801748806,
+  "n_classes": 89,
+  "n_train": 5336,
+  "n_test": 5340,
+  "n_test_not_ok": 56,
+  "n_subjects_enrollable": 89,
+  "n_subjects_impostor_holdout": 20,
+  "config_fingerprint": "3d3c06755c838642"
+}

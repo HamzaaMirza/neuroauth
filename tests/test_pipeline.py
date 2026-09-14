@@ -7,9 +7,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from neuroauth.config import FRONTAL_EOG_CHANNELS, PipelineConfig
+from neuroauth.config import FRONTAL_EOG_CHANNELS, TEMPORAL_EMG_CHANNELS, PipelineConfig
 from neuroauth.dsp import pipeline
-from neuroauth.dsp.features import extract_features
+from neuroauth.dsp.features import extract_features, feature_channels
 from neuroauth.dsp.io import run_condition
 from neuroauth.dsp.preprocess import preprocess
 from neuroauth.dsp.types import Recording
@@ -73,10 +73,14 @@ def test_iter_features_yields_one_matrix_per_loaded_recording(
 
 @pytest.mark.slow
 @needs_data
-def test_real_recording_carries_the_frontal_channels() -> None:
-    """FRONTAL_EOG_CHANNELS must match the loader's spelling, or D-004b checks nothing."""
+def test_real_recording_carries_the_confound_check_channels() -> None:
+    """Channel constants must match the loader's spelling, or the checks see nothing.
+
+    Covers the frontal EOG channels (D-004b) and the temporal EMG channels (D-018).
+    """
     (matrix,) = pipeline.iter_features([1], DATA_DIR, PipelineConfig(), runs=(1,))
-    channels = {name.split(":")[1] for name in matrix.feature_names}
+    channels = set(feature_channels(matrix.feature_names))
     assert set(FRONTAL_EOG_CHANNELS) <= channels
+    assert set(TEMPORAL_EMG_CHANNELS) <= channels
     assert matrix.values.shape == (60, 64 * 5)
     assert np.isfinite(matrix.values).all()

@@ -8,19 +8,27 @@ Four evaluations, because one number would not be interpretable:
     4. absolute_log x temporal
 
 plus one deliberately leaky random split, written to its own artifact and labelled as
-a demonstration, to measure what the guarded splits prevent (D-017).
+a demonstration, to measure what the guarded splits prevent (D-017),
+
+plus two EMG ablations of the headline, written to emg_ablation.json (D-018): the gamma
+band removed with relative power renormalized over 1-30 Hz, and the lateral temporal
+channels removed. Each is judged against the a priori 0.05 macro-F1 materiality
+threshold. A drop bounds the contribution of what was removed; it does not decompose
+it, because those features carry both muscle and neural activity.
 
 Preconditions, checked before any EEG is loaded:
     - config/impostor_holdout.json is committed and unmodified, so no result can
       predate the holdout commitment (D-008). The list is loaded from that file,
       never re-derived from the seed.
+    - Writing artifacts/ requires a clean working tree, so git_head names the code
+      that produced the numbers.
     - No subject about to be used is in the holdout (assert_holdout_excluded).
 
 Every model gets the shuffled-label control. If any control exceeds 3x chance the
 script aborts before writing a single artifact. The control catches label leakage
 outside the train association; window-overlap leakage is ruled out structurally by
-assert_no_window_overlap (D-007). Thresholds, seeds, and split parameters were fixed
-before the first real-data run (D-016).
+assert_no_window_overlap (D-007). Thresholds, seeds, and split parameters are fixed a
+priori (D-016).
 
 Windows flagged by the quality mask are scored, not excluded; the count is reported
 next to each score, and per-recording rates go to quality_flag_rates.csv (D-015).
@@ -53,10 +61,18 @@ import numpy as np
 import sklearn
 
 from neuroauth.cohorts import DEFAULT_HOLDOUT_PATH, assert_holdout_excluded, load_holdout_record
-from neuroauth.config import FRONTAL_EOG_CHANNELS, FeatureConfig, Normalization, PipelineConfig
+from neuroauth.config import (
+    BANDS,
+    FRONTAL_EOG_CHANNELS,
+    TEMPORAL_EMG_CHANNELS,
+    FeatureConfig,
+    Normalization,
+    PipelineConfig,
+)
 from neuroauth.dsp.io import load_baseline_recordings
 from neuroauth.dsp.pipeline import process_recording
 from neuroauth.dsp.types import FeatureMatrix
+from neuroauth.models.ablation import bands_without, drop_channels
 from neuroauth.models.baseline import (
     BaselineConfig,
     band_importance,
@@ -67,12 +83,14 @@ from neuroauth.models.baseline import (
     train_baseline,
 )
 from neuroauth.models.evaluation import (
+    ABLATION_MATERIAL_DROP,
     CONTROL_MAX_CHANCE_RATIO,
     MATERIAL_DELTA,
     IdentificationReport,
     check_shuffled_label_control,
     compare_normalizations,
     evaluate_identification,
+    summarize_ablation,
     summarize_quality,
     write_quality_report,
     write_report,
@@ -97,6 +115,8 @@ CONTROL_SEED = 20260914
 LEAKY_SPLIT_SEED = 20260915
 LEAKY_SPLIT_KIND = "leaky_random_demonstration"
 LEAKAGE_ARTIFACT = "leakage_demonstration.json"
+EMG_ABLATION_ARTIFACT = "emg_ablation.json"
+GAMMA_ABLATION_CONFIG = "relative_without_gamma"
 
 
 class PreconditionError(RuntimeError):
@@ -113,6 +133,24 @@ class RunResult:
     channel_importance: dict[str, float]
     frontal_share: float
     uniform_share: float
+
+
+@dataclass(frozen=True)
+class Ablation:
+    """A version of the headline features with a candidate confound removed.
+
+    Attributes:
+        name: Artifact key, e.g. "without_gamma".
+        removed: Plain-language description of what was removed.
+        matrices: Per-recording feature matrices without it, same recordings as the
+            headline.
+        fingerprint: Fingerprint of the PipelineConfig that produced the matrices.
+    """
+
+    name: str
+    removed: str
+    matrices: list[FeatureMatrix]
+    fingerprint: str
 
 
 def check_holdout_committed(holdout_path: Path, repo_root: Path) -> str:
@@ -158,21 +196,60 @@ def check_holdout_committed(holdout_path: Path, repo_root: Path) -> str:
     return head.stdout.strip()
 
 
+def working_tree_changes(repo_root: Path) -> list[str]:
+    """Paths with uncommitted changes, tracked or untracked, outside artifacts/.
+
+    Committed artifacts must trace back to committed code: a git_head recorded from a
+    dirty tree names a commit that did not produce the numbers. Regenerated artifacts
+    themselves are ignored, so a re-run on clean code is not blocked by its own output.
+
+    Args:
+        repo_root: The git working tree.
+
+    Returns:
+        Changed paths, as git reports them. Empty for a clean tree.
+
+    Raises:
+        PreconditionError: If git is unavailable or the status cannot be read.
+    """
+    try:
+        status = subprocess.run(
+            [
+                "git",
+                "status",
+                "--porcelain",
+                "--untracked-files=all",
+                "--",
+                ".",
+                ":(exclude)artifacts",
+            ],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        raise PreconditionError("git is not available to check the working tree") from None
+    if status.returncode != 0:
+        raise PreconditionError(f"git status failed: {status.stderr.strip()}")
+    return [line[3:] for line in status.stdout.splitlines() if line.strip()]
+
+
 def load_feature_sets(
     subjects: Sequence[int],
     data_dir: Path,
-    configs: dict[Normalization, PipelineConfig],
-) -> dict[Normalization, list[FeatureMatrix]]:
+    configs: dict[str, PipelineConfig],
+) -> dict[str, list[FeatureMatrix]]:
     """Load each recording once and extract features under every config.
 
     A recording that fails to load aborts the run: every baseline recording passed
     the structural check (D-014), so a failure now is a problem to fix, not a
     subject to drop silently.
     """
-    sets: dict[Normalization, list[FeatureMatrix]] = {name: [] for name in configs}
+    sets: dict[str, list[FeatureMatrix]] = {name: [] for name in configs}
     for recording in load_baseline_recordings(subjects, data_dir, skip_failures=False):
-        for normalization, config in configs.items():
-            sets[normalization].append(process_recording(recording, config))
+        for name, config in configs.items():
+            sets[name].append(process_recording(recording, config))
     return sets
 
 
@@ -332,6 +409,7 @@ def run(
     fingerprints: dict[Normalization, str],
     window_s: float,
     baseline: BaselineConfig,
+    ablations: Sequence[Ablation],
     provenance: dict[str, Any],
 ) -> dict[str, Any]:
     """Evaluate every model, gate every control, and only then write artifacts.
@@ -344,6 +422,7 @@ def run(
         fingerprints: PipelineConfig.fingerprint() per normalization.
         window_s: Window length; also the temporal-split guard.
         baseline: Random Forest hyperparameters.
+        ablations: EMG ablations, each scored on the headline split (D-018).
         provenance: Merged into run_summary.json (git HEAD, holdout record, versions).
 
     Returns:
@@ -353,7 +432,11 @@ def run(
         AssertionError: If a holdout subject is present or any shuffled-label control
             fails. Nothing is written in either case.
     """
-    for matrices in matrices_by_normalization.values():
+    all_matrices = [
+        *matrices_by_normalization.values(),
+        *(ablation.matrices for ablation in ablations),
+    ]
+    for matrices in all_matrices:
         assert_holdout_excluded(
             (matrix.subject_id for matrix in matrices if matrix.subject_id is not None), holdout
         )
@@ -383,6 +466,27 @@ def run(
         baseline=baseline,
     )
 
+    headline = results[HEADLINE]
+    ablation_results: dict[str, tuple[Ablation, RunResult]] = {}
+    for ablation in ablations:
+        print(f"  training EMG ablation {ablation.name}", flush=True)
+        ablation_results[ablation.name] = (
+            ablation,
+            evaluate_split(
+                ablation.matrices,
+                HEADLINE[1],
+                normalization=HEADLINE[0],
+                fingerprint=ablation.fingerprint,
+                window_s=window_s,
+                n_holdout=len(holdout),
+                baseline=baseline,
+            ),
+        )
+    ablation_summaries = {
+        name: summarize_ablation(headline.report, result.report, removed=ablation.removed)
+        for name, (ablation, result) in ablation_results.items()
+    }
+
     # Every control has passed. Only now does anything touch disk.
     out_dir.mkdir(parents=True, exist_ok=True)
     for (normalization, split_kind), result in results.items():
@@ -403,16 +507,46 @@ def run(
     )
     write_quality_report(summarize_quality(relative), out_dir)
     _write_json(out_dir / LEAKAGE_ARTIFACT, leakage)
+    _write_json(
+        out_dir / EMG_ABLATION_ARTIFACT,
+        {
+            "what_this_is": (
+                "Ablations of the headline model, each removing features where scalp "
+                "muscle activity (EMG) concentrates. See docs/DECISIONS.md D-018."
+            ),
+            "framing": (
+                "Each drop bounds the contribution of information unique to the removed "
+                "features; it does not decompose it. Gamma at temporal sites contains both "
+                "muscle and neural activity, and scalp EEG cannot separate them."
+            ),
+            "headline": {
+                "normalization": headline.report.normalization,
+                "split_kind": headline.report.split_kind,
+                "macro_f1": headline.report.macro_f1,
+            },
+            "ablations": {
+                name: {
+                    **ablation_summaries[name],
+                    "shuffled_label_macro_f1": result.report.shuffled_label_macro_f1,
+                    "chance_level": result.report.chance_level,
+                    "n_features": int(ablation.matrices[0].values.shape[1]),
+                    "config_fingerprint": ablation.fingerprint,
+                    "band_importance": result.band_importance,
+                    "top_channels": dict(list(result.channel_importance.items())[:8]),
+                }
+                for name, (ablation, result) in ablation_results.items()
+            },
+        },
+    )
 
-    headline = results[HEADLINE].report
     summary: dict[str, Any] = {
         **provenance,
         "headline": {
-            "normalization": headline.normalization,
-            "split_kind": headline.split_kind,
-            "macro_f1": headline.macro_f1,
-            "chance_level": headline.chance_level,
-            "shuffled_label_macro_f1": headline.shuffled_label_macro_f1,
+            "normalization": headline.report.normalization,
+            "split_kind": headline.report.split_kind,
+            "macro_f1": headline.report.macro_f1,
+            "chance_level": headline.report.chance_level,
+            "shuffled_label_macro_f1": headline.report.shuffled_label_macro_f1,
         },
         "runs": [
             {
@@ -441,7 +575,18 @@ def run(
                 "leaky_fraction_sharing_samples",
             )
         },
-        "n_subjects_evaluated": len(headline.labels),
+        "emg_ablation": {
+            name: {
+                "macro_f1": result.report.macro_f1,
+                "shuffled_label_macro_f1": result.report.shuffled_label_macro_f1,
+                "drop_headline_minus_ablated": ablation_summaries[name][
+                    "drop_headline_minus_ablated"
+                ],
+                "material": ablation_summaries[name]["material"],
+            }
+            for name, (_, result) in ablation_results.items()
+        },
+        "n_subjects_evaluated": len(headline.report.labels),
         "n_subjects_impostor_holdout": len(holdout),
         "config_fingerprints": dict(fingerprints),
         "baseline_config": asdict(baseline),
@@ -457,6 +602,7 @@ def run(
         "a_priori_thresholds": {
             "control_max_chance_ratio": CONTROL_MAX_CHANCE_RATIO,
             "material_delta": MATERIAL_DELTA,
+            "ablation_material_drop": ABLATION_MATERIAL_DROP,
         },
     }
     _write_json(out_dir / "run_summary.json", summary)
@@ -503,46 +649,15 @@ def _print_summary(summary: dict[str, Any], out_dir: Path, elapsed_s: float) -> 
         f"deliberately leaky random {leak['leaky_macro_f1']:.3f}, "
         f"shuffled control on leaky {leak['leaky_shuffled_label_macro_f1']:.3f}"
     )
-    print(f"\nartifacts written to {out_dir} in {elapsed_s:.0f} s")
-
-
-def working_tree_changes(repo_root: Path) -> list[str]:
-    """Paths with uncommitted changes, tracked or untracked, outside artifacts/.
-
-    Committed artifacts must trace back to committed code: a git_head recorded from a
-    dirty tree names a commit that did not produce the numbers. Regenerated artifacts
-    themselves are ignored, so a re-run on clean code is not blocked by its own output.
-
-    Args:
-        repo_root: The git working tree.
-
-    Returns:
-        Changed paths, as git reports them. Empty for a clean tree.
-
-    Raises:
-        PreconditionError: If git is unavailable or the status cannot be read.
-    """
-    try:
-        status = subprocess.run(
-            [
-                "git",
-                "status",
-                "--porcelain",
-                "--untracked-files=all",
-                "--",
-                ".",
-                ":(exclude)artifacts",
-            ],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
+    print(f"\nEMG ablations of the headline ({summary['headline']['macro_f1']:.3f}):")
+    for name, entry in summary["emg_ablation"].items():
+        verdict = "material" if entry["material"] else "not material"
+        print(
+            f"  {name:<28}macro-F1 {entry['macro_f1']:.3f}  "
+            f"drop {entry['drop_headline_minus_ablated']:+.3f}  {verdict}  "
+            f"(shuffled {entry['shuffled_label_macro_f1']:.3f})"
         )
-    except FileNotFoundError:
-        raise PreconditionError("git is not available to check the working tree") from None
-    if status.returncode != 0:
-        raise PreconditionError(f"git status failed: {status.stderr.strip()}")
-    return [line[3:] for line in status.stdout.splitlines() if line.strip()]
+    print(f"\nartifacts written to {out_dir} in {elapsed_s:.0f} s")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -570,12 +685,40 @@ def main(argv: Sequence[str] | None = None) -> int:
     holdout = frozenset(record.impostor_holdout)
     assert_holdout_excluded(subjects, holdout)
 
-    configs = {
+    feature_configs: dict[str, PipelineConfig] = {
         name: PipelineConfig(features=FeatureConfig(normalization=name)) for name in NORMALIZATIONS
     }
-    print(f"extracting features: {len(subjects)} enrollable subjects x 2 baseline runs", flush=True)
-    matrices = load_feature_sets(subjects, args.data_dir, configs)
+    feature_configs[GAMMA_ABLATION_CONFIG] = PipelineConfig(
+        features=FeatureConfig(normalization="relative", bands=bands_without(BANDS, ("gamma",)))
+    )
+    print(
+        f"extracting features: {len(subjects)} enrollable subjects x 2 baseline runs, "
+        f"{len(feature_configs)} feature configs",
+        flush=True,
+    )
+    sets = load_feature_sets(subjects, args.data_dir, feature_configs)
     print(f"  done in {time.perf_counter() - started:.0f} s", flush=True)
+
+    matrices: dict[Normalization, list[FeatureMatrix]] = {
+        name: sets[name] for name in NORMALIZATIONS
+    }
+    ablations = [
+        Ablation(
+            name="without_gamma",
+            removed=(
+                "the gamma band (30-50 Hz) at every channel, with relative power "
+                "renormalized over 1-30 Hz"
+            ),
+            matrices=sets[GAMMA_ABLATION_CONFIG],
+            fingerprint=feature_configs[GAMMA_ABLATION_CONFIG].fingerprint(),
+        ),
+        Ablation(
+            name="without_temporal_channels",
+            removed=f"every band at the lateral temporal sites {', '.join(TEMPORAL_EMG_CHANNELS)}",
+            matrices=[drop_channels(matrix, TEMPORAL_EMG_CHANNELS) for matrix in sets["relative"]],
+            fingerprint=feature_configs["relative"].fingerprint(),
+        ),
+    ]
 
     provenance: dict[str, Any] = {
         "git_head": git_head,
@@ -599,9 +742,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             matrices,
             holdout=holdout,
             out_dir=out_dir,
-            fingerprints={name: config.fingerprint() for name, config in configs.items()},
-            window_s=configs["relative"].window.window_s,
+            fingerprints={name: feature_configs[name].fingerprint() for name in NORMALIZATIONS},
+            window_s=feature_configs["relative"].window.window_s,
             baseline=BaselineConfig(),
+            ablations=ablations,
             provenance=provenance,
         )
     except AssertionError as exc:

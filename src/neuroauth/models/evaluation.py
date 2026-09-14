@@ -24,6 +24,7 @@ from numpy.typing import NDArray
 from sklearn.metrics import confusion_matrix, f1_score
 
 from neuroauth.config import FRONTAL_EOG_CHANNELS
+from neuroauth.dsp.features import feature_channels
 from neuroauth.dsp.types import FeatureMatrix
 
 CONTROL_MAX_CHANCE_RATIO = 3.0
@@ -37,6 +38,18 @@ MATERIAL_DELTA = 0.05
 
 Set a priori, before any model was fit on real EEG. Not to be adjusted after seeing
 results (D-016)."""
+
+ABLATION_MATERIAL_DROP = 0.05
+"""Macro-F1 drop from removing a feature set that is treated as material (D-018).
+
+Set a priori, after the first full run and before any ablation was run. Not to be
+adjusted after seeing results (D-016)."""
+
+ABLATION_SCOPE = (
+    "The bound covers only information unique to the removed features. Muscle activity "
+    "that remains in the retained features, and anything the model recovers from "
+    "features correlated with the removed ones, is not bounded by this check."
+)
 
 QUALITY_REPORT_FILENAME = "quality_flag_rates.csv"
 
@@ -223,6 +236,15 @@ def check_shuffled_label_control(
         )
 
 
+def _check_comparable(first: IdentificationReport, second: IdentificationReport) -> None:
+    if (first.split_kind, first.labels, first.n_test) != (
+        second.split_kind,
+        second.labels,
+        second.n_test,
+    ):
+        raise ValueError("reports differ in split, labels, or test rows; they are not comparable")
+
+
 def compare_normalizations(
     relative: IdentificationReport,
     absolute: IdentificationReport,
@@ -231,12 +253,13 @@ def compare_normalizations(
 ) -> dict[str, float | str]:
     """Summarize the relative-vs-absolute band-power comparison.
 
-    The gap between the two is a finding, not a footnote. If absolute scores
-    materially higher, the honest reading is that single-session amplitude
-    confounds -- electrode impedance, cap placement, amplifier gain, all perfectly
-    correlated with subject in this dataset -- are doing the work, not identity
-    information. Reporting that gap and naming its cause is worth more than the
-    higher number would be.
+    The gap between the two is a finding, not a footnote -- but a bounded one. Absolute
+    power carries amplitude from two sources that single-session data cannot separate:
+    recording artifacts (electrode impedance, cap placement, amplifier gain), perfectly
+    confounded with subject in this dataset, and anatomy (skull thickness, tissue
+    conductivity), which is person-specific and would survive a second session. A
+    material gap is therefore reported as an upper bound on the session-artifact
+    contribution, never as a measure of it (D-004).
 
     Args:
         relative: Report from the "relative" run. The headline.
@@ -257,21 +280,18 @@ def compare_normalizations(
             f"expected (relative, absolute_log) reports, got ({relative.normalization}, "
             f"{absolute.normalization})"
         )
-    if (relative.split_kind, relative.labels, relative.n_test) != (
-        absolute.split_kind,
-        absolute.labels,
-        absolute.n_test,
-    ):
-        raise ValueError("reports differ in split, labels, or test rows; they are not comparable")
+    _check_comparable(relative, absolute)
 
     split = relative.split_kind.replace("_", "-")
     delta = absolute.macro_f1 - relative.macro_f1
     if delta > material_delta:
         interpretation = (
             f"Absolute band power scores {delta:.3f} macro-F1 higher than relative on the "
-            f"{split} split. eegmmidb is single-session, so this gap is consistent with "
-            "recording-level amplitude confounds (impedance, cap placement, amplifier "
-            "gain) rather than identity information."
+            f"{split} split. eegmmidb is single-session, so the amplitude information behind "
+            "this gap cannot be separated from session artifacts (impedance, cap placement, "
+            "amplifier gain): the gap is an upper bound on their contribution. Part of it "
+            "may be anatomy, such as skull thickness, which is person-specific and would "
+            "survive a second session."
         )
     elif delta < -material_delta:
         interpretation = (
@@ -291,6 +311,70 @@ def compare_normalizations(
         "delta_absolute_minus_relative": delta,
         "material_delta": material_delta,
         "interpretation": interpretation,
+    }
+
+
+def summarize_ablation(
+    headline: IdentificationReport,
+    ablated: IdentificationReport,
+    *,
+    removed: str,
+    material_drop: float = ABLATION_MATERIAL_DROP,
+) -> dict[str, float | str | bool]:
+    """Summarize how much the headline depends on a removed set of features.
+
+    The drop bounds the contribution of information unique to the removed features; it
+    does not decompose it. For the EMG check the removed features carry both muscle and
+    neural activity, and scalp EEG cannot separate the two, so a drop -- material or
+    not -- says nothing about how much of that information is EMG (D-018).
+
+    Args:
+        headline: The full-feature report.
+        ablated: Scored on the same split, labels, and test rows without the removed
+            features.
+        removed: Plain-language description of what was removed, used in the text.
+        material_drop: Macro-F1 drop treated as material.
+
+    Returns:
+        A JSON-serializable summary: both macro-F1 values, the drop (headline minus
+        ablated), whether it is material, the threshold, an interpretation, and the
+        scope of the bound.
+
+    Raises:
+        ValueError: If the reports were not scored on the same split, labels, and test
+            rows.
+    """
+    _check_comparable(headline, ablated)
+    drop = headline.macro_f1 - ablated.macro_f1
+    change = f"({headline.macro_f1:.3f} to {ablated.macro_f1:.3f})"
+    if drop > material_drop:
+        interpretation = (
+            f"Removing {removed} lowers macro-F1 by {drop:.3f} {change}, above the "
+            f"{material_drop} materiality threshold: the headline depends on information "
+            "unique to those features. They carry both muscle and neural activity, which "
+            f"scalp EEG cannot separate, so {drop:.3f} bounds their combined contribution "
+            "from above and does not say how much of it is EMG."
+        )
+    elif drop < -material_drop:
+        interpretation = (
+            f"Removing {removed} raises macro-F1 by {-drop:.3f} {change}: the headline "
+            "does not depend on information unique to those features."
+        )
+    else:
+        interpretation = (
+            f"Removing {removed} changes macro-F1 by {-drop:+.3f} {change}, within the "
+            f"{material_drop} materiality threshold: information unique to those features, "
+            "muscle and neural together, is not a material part of the headline."
+        )
+    return {
+        "removed": removed,
+        "headline_macro_f1": headline.macro_f1,
+        "ablated_macro_f1": ablated.macro_f1,
+        "drop_headline_minus_ablated": drop,
+        "material": drop > material_drop,
+        "material_drop": material_drop,
+        "interpretation": interpretation,
+        "scope": ABLATION_SCOPE,
     }
 
 
@@ -441,10 +525,6 @@ class RecordingQuality:
     n_windows_frontal_flag: int
 
 
-def _channel_order(feature_names: tuple[str, ...]) -> tuple[str, ...]:
-    return tuple(dict.fromkeys(name.split(":")[1] for name in feature_names))
-
-
 def summarize_quality(
     matrices: Sequence[FeatureMatrix],
     *,
@@ -472,7 +552,7 @@ def summarize_quality(
     for matrix in matrices:
         if matrix.subject_id is None or matrix.run is None or matrix.condition is None:
             raise ValueError("quality summaries need subject_id, run, and condition")
-        channels = _channel_order(matrix.feature_names)
+        channels = feature_channels(matrix.feature_names)
         bad = ~matrix.quality.channel_ok
         if len(channels) != bad.shape[1]:
             raise ValueError(

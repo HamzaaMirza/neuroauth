@@ -31,6 +31,21 @@ FRONTAL_EOG_CHANNELS: Final[tuple[str, ...]] = ("Fp1", "Fp2", "AF7", "AF8")
 eyes-open-trained models, importance concentrating here signals the EOG confound
 (D-004b). Spelled as the loader's standardized 10-10 names."""
 
+TEMPORAL_EMG_CHANNELS: Final[tuple[str, ...]] = (
+    "FT7",
+    "FT8",
+    "T7",
+    "T8",
+    "TP7",
+    "TP8",
+    "T9",
+    "T10",
+)
+"""The lateral temporal electrodes, over the temporalis muscle, where scalp muscle
+activity (EMG) is strongest. Chosen by anatomy -- every lateral temporal site in the
+montage -- rather than by importance rank, and fixed before the ablation run (D-018).
+Iz, near the neck muscles, is not included."""
+
 Normalization = Literal["relative", "absolute_log", "both"]
 
 
@@ -101,10 +116,12 @@ class FeatureConfig:
             eegmmidb is single-session, so every recording-specific artifact
             (electrode impedance, cap placement, amplifier gain) is perfectly
             confounded with subject identity. Absolute power carries those offsets
-            directly, which lets a model score well by recognizing a recording's
-            broadband amplitude without learning anything about the person.
+            directly, which lets a model score well partly by recognizing a
+            recording's broadband amplitude. Amplitude also reflects anatomy, which
+            is person-specific, and one session cannot separate the two.
             "absolute_log" is run as a comparison, not as the headline; the gap
-            between the two is a reportable finding. See docs/DECISIONS.md.
+            between the two is an upper bound on the session-artifact contribution
+            (D-004).
         log_epsilon: Added before log10 to keep a flat channel finite.
     """
 

@@ -66,6 +66,31 @@ def feature_names(
     )
 
 
+def feature_channels(names: tuple[str, ...]) -> tuple[str, ...]:
+    """Recover the channel order from feature names.
+
+    Reads the channel field of each "mode:channel:band" name, in order of first
+    appearance. That order matches the data rows the features were computed from, and
+    so the columns of QualityReport.channel_ok.
+
+    Args:
+        names: As produced by feature_names.
+
+    Returns:
+        Channel names, each once, in data row order.
+
+    Raises:
+        ValueError: If a name is not in mode:channel:band form.
+    """
+    channels: dict[str, None] = {}
+    for name in names:
+        parts = name.split(":")
+        if len(parts) != 3:
+            raise ValueError(f"feature name {name!r} is not in mode:channel:band form")
+        channels.setdefault(parts[1], None)
+    return tuple(channels)
+
+
 def welch_psd(
     window: NDArray[np.float64],
     sfreq: float,
@@ -193,8 +218,9 @@ def normalize_band_powers(
     ensemble is indifferent to this; a linear model would not be.
 
     "absolute_log" returns log10(power + log_epsilon). It is run as a comparison,
-    not as the headline. If it scores materially higher, that gap is a finding about
-    single-session amplitude confounds and gets reported as one.
+    not as the headline. If it scores materially higher, the gap is reported as an
+    upper bound on the session-artifact contribution: amplitude also reflects anatomy,
+    which single-session data cannot separate from recording artifacts (D-004).
 
     Non-finite or negative powers are treated as zero before either transform. A
     channel with zero total power therefore yields all-zero relative values and

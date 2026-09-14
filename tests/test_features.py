@@ -108,7 +108,8 @@ def test_relative_is_invariant_to_amplitude_scaling() -> None:
     """Scaling a channel by 10x leaves its relative band powers unchanged.
 
     This is the whole argument for relative being the headline: it discards exactly
-    the single-session amplitude confound that absolute power would encode.
+    the per-channel amplitude scaling that absolute power would encode -- session
+    artifact and anatomy alike, which single-session data cannot tell apart.
     """
     data, scaled = _scaled_pair()
     np.testing.assert_allclose(

@@ -1,14 +1,14 @@
 # PROGRESS — NeuroAuth
 
 **Current phase:** 1 — Signal pipeline + identification baseline
-**Status:** Full run complete from clean, pushed commit `b3450bf`. Every shuffled-label
-control passed. Artifacts written to `artifacts/`, **not yet committed**. The README
-results section waits on two decisions (below).
+**Status:** Baseline run committed (`6fa508d`). EMG ablations and the corrected
+absolute/relative wording are implemented and tested, **not yet committed or run**. The
+next full run regenerates every artifact from one commit and adds `emg_ablation.json`.
 **Last updated:** 2026-09-14
 
 ---
 
-## Phase 1 results (full run, 89 enrollable subjects, chance 0.011)
+## Phase 1 results (full run from `b3450bf`, 89 enrollable subjects, chance 0.011)
 
 | Normalization | Split | Macro-F1 | Shuffled control (ceiling 0.034) |
 |---|---|---|---|
@@ -18,59 +18,47 @@ results section waits on two decisions (below).
 | absolute_log | temporal | 0.956 | 0.015 |
 
 - **Brain-state change is the dominant effect.** Relative: 0.846 within condition vs
-  0.378 across. Headline per-subject F1: median 0.359, IQR 0.110–0.611, 14 of 89
-  subjects at 0.
-- **Absolute − relative:** +0.219 cross-condition, +0.110 temporal. Both over the 0.05
-  materiality threshold (D-016). The temporal gap is compressed by the ceiling.
-- **Leakage demonstration (D-017):** guarded temporal 0.846 vs deliberately leaky
-  random 0.906 (+0.060; apparent error 0.154 → 0.094). 90% of leaky test windows share
-  samples with training. The control on the leaky split reads 0.011 — chance —
-  confirming on real data that it cannot see this leak (D-007).
-- **Frontal EOG (D-004b):** eyes-open-trained models put 1.23× (relative) and 1.35×
-  (absolute) the uniform share on Fp1/Fp2/AF7/AF8. Those channels rank 9th–20th of
-  64, and 11–13% of random 4-channel groups carry as much. Models trained on both
-  conditions: 1.05× and 0.88×. The direction fits the hypothesis; the size is modest.
-  No a priori criterion for "concentrates" was set.
-- **Top importance is lateral-temporal and gamma** in all four models: T9, T10, T7,
-  T8, TP7/TP8, FT8 and Iz lead; gamma is the top band (38–48%). Open question below.
+  0.378 across. Headline per-subject F1: median 0.359, IQR 0.110–0.611.
+- **Absolute − relative:** +0.219 cross-condition, +0.110 temporal. Both material
+  (D-016). Reported as an upper bound on the session-artifact contribution — amplitude
+  also reflects anatomy, which one session cannot separate (D-004, corrected).
+- **Leakage demonstration (D-017):** guarded temporal 0.846 vs deliberately leaky random
+  0.906 (+0.060; apparent error 0.154 → 0.094). 90% of leaky test windows share samples
+  with training. Control on the leaky split: 0.011, i.e. chance (D-007 confirmed).
+- **Frontal EOG (D-004b): does not concentrate.** 1.23× / 1.35× uniform on eyes-open
+  models vs 1.05× / 0.88× on both-condition models. Right direction, too small to act
+  on. Frontal-excluded variant not run.
+- **Lateral-temporal gamma leads importance** in all four models → EMG ablations
+  (D-018), pending.
 - **Delta (D-005):** 13–15% on relative models, level with theta and alpha. Kept.
-- **Quality (D-015):** not-ok windows 5.7% eyes-open, 1.0% eyes-closed; frontal flags
-  20.2% vs 1.4%. S009 — which lost every window at 250 uV — scores F1 0.81 on the
-  headline. Excluding flagged windows would have removed a well-identified subject.
-- **Provenance:** `git_head` b3450bf, `git_dirty` false, fingerprints
-  relative 3d3c06755c838642 / absolute_log be030ad69d2fd7a3.
+- **Quality (D-015):** not-ok windows 5.7% eyes-open, 1.0% eyes-closed. S009 scores F1
+  0.81 on the headline — excluding flagged windows would have dropped it.
+
+### Phase 2 expectation: the per-subject tail
+
+**14 of 89 subjects score F1 = 0 on the headline split** (21 below 0.1), while the
+median is 0.36. Identity features survive the brain-state change for most subjects and
+not at all for some. Expect the Phase 2 per-subject EER distribution to carry a heavy
+tail. Report per-subject EER (distribution and worst decile), not only the pooled
+number, and check whether the same subjects sit in both tails.
 
 ---
 
 ## Next up
 
-1. **Commit `artifacts/` on its own** (produced by `b3450bf`), then push.
-2. **Decide the absolute/relative wording** before it reaches the README (open question).
-3. **Decide on an EMG check** (open question). If yes: fix the comparison criterion
-   before running, as D-016 did.
-4. **Decide on the frontal-excluded variant** (D-004b). Current read: not warranted.
-5. README results section → **Phase 1 exit criteria met**.
-6. Remaining Phase 1 checklist items off the exit path: Docker Compose, applying the
+1. **Commit** the ablation work and the wording correction; push.
+2. **Full run** from that commit: regenerates all artifacts. The four baseline models
+   use fixed seeds, so their numbers should reproduce exactly — check that, then read
+   `emg_ablation.json`.
+3. **README results section**, framing the EMG outcome as a bound, not a decomposition.
+4. Commit artifacts → **Phase 1 exit criteria met**.
+5. Remaining Phase 1 checklist items off the exit path: Docker Compose, applying the
    Postgres schema.
 
 ---
 
 ## Open questions
 
-- **Absolute/relative interpretation wording.** The generated text says the gap is
-  "consistent with recording-level amplitude confounds … rather than identity
-  information". The first half holds. The second overclaims: absolute amplitude also
-  reflects anatomy — skull thickness, tissue conductivity, head geometry — which is
-  person-specific and would survive a second session. Single-session data cannot
-  separate the two, so the gap is an upper bound on the session-artifact
-  contribution, not a measure of it.
-- **Muscle artifact (EMG) as a third confound.** Gamma (30–50 Hz) at lateral-temporal
-  electrodes (T9/T10/T7/T8 sit over the temporalis muscle) and at Iz (near neck
-  muscles) is where scalp EMG shows up. Muscle tone and jaw habits are person-specific
-  and stable within a sitting — the same class of confound as D-004 and D-004b. The
-  importance pattern fits that; it does not prove it. A check could drop the gamma
-  band, drop the temporal-edge channels, or both, and report each against the
-  headline.
 - **Phase 2: filter edge effects on short buffers.** Same preprocessing function on
   both paths, but `sosfiltfilt` edge transients differ between a 61 s recording and a
   short live buffer. D-001 removes code skew, not this.
@@ -110,16 +98,19 @@ egg-info untracked. `drop_partial` removed; quality threshold 250 → 500 uV.
 `models/splits.py`, `models/baseline.py`, `models/evaluation.py`.
 `config.fingerprint()`. Deliberately leaky split + overlap counting.
 `scripts/train_baseline.py` with holdout-committed and clean-tree preconditions.
-Smoke run, then the full run (661 s) from `b3450bf`. D-004b, D-008 (updated),
-D-013–D-017; D-005 outcome; D-007 corrected twice.
-**Next:** Commit artifacts; decide wording, EMG check, frontal variant; README results.
+Smoke run, then the full baseline run (661 s) from `b3450bf`, committed as `6fa508d`.
+Then: `models/ablation.py`, EMG ablations in the driver, corrected absolute/relative
+wording. D-004 (corrected), D-004b (outcome), D-005 (outcome), D-007 (corrected),
+D-008 (updated), D-013–D-018.
+**Next:** Commit, full run with ablations, README results.
 **Notes / decisions:** Band-power contract was wrong, fixed (D-013). Quality mask at
 250 uV flagged EOG and eyes-closed alpha; raised and made report-only (D-015). The
-shuffled-label control cannot detect overlap leakage (D-007), confirmed on real data by
-the leakage demonstration (D-017). Both evaluation thresholds fixed a priori (D-016).
-Full run: headline 0.378 (34× chance); the brain-state change is the dominant effect;
-absolute power is materially higher; frontal EOG signal modest; lateral-temporal gamma
-leads importance — possible EMG confound, open. User commits; never auto-commit.
+shuffled-label control cannot detect overlap leakage (D-007), confirmed on real data
+(D-017). All evaluation thresholds fixed before the runs they judge (D-016). Headline
+0.378. Frontal EOG does not concentrate. The absolute/relative wording claimed a
+decomposition single-session data cannot support — corrected to an upper bound.
+Lateral-temporal gamma leads importance → two ablations, framed as bounds (D-018).
+User commits; never auto-commit.
 
 ### 2026-08-21
 **Phase:** 1

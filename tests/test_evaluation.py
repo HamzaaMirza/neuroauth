@@ -15,6 +15,7 @@ from neuroauth.models.evaluation import (
     compare_normalizations,
     evaluate_identification,
     macro_f1,
+    summarize_ablation,
     summarize_quality,
     write_quality_report,
     write_report,
@@ -109,13 +110,17 @@ def test_control_fails_when_it_was_not_run() -> None:
         check_shuffled_label_control(_report(PERFECT, shuffled=None))
 
 
-def test_compare_normalizations_reports_a_material_gap() -> None:
+def test_compare_normalizations_reports_a_material_gap_as_a_bound() -> None:
+    """A material gap is an upper bound on session artifacts, never a decomposition."""
     summary = compare_normalizations(
         _report(HALF_RIGHT, normalization="relative"),
         _report(PERFECT, normalization="absolute_log"),
     )
+    text = str(summary["interpretation"])
     assert summary["delta_absolute_minus_relative"] == pytest.approx(0.5)
-    assert "amplitude" in str(summary["interpretation"])
+    assert "upper bound" in text
+    assert "cannot be separated" in text
+    assert "rather than identity" not in text
 
 
 def test_compare_normalizations_within_tolerance() -> None:
@@ -135,6 +140,37 @@ def test_compare_normalizations_rejects_incomparable_reports() -> None:
         )
     with pytest.raises(ValueError):
         compare_normalizations(_report(PERFECT, normalization="absolute_log"), relative)
+
+
+def test_summarize_ablation_material_drop_is_a_bound() -> None:
+    summary = summarize_ablation(_report(PERFECT), _report(HALF_RIGHT), removed="the gamma band")
+    text = str(summary["interpretation"])
+    assert summary["drop_headline_minus_ablated"] == pytest.approx(0.5)
+    assert summary["material"] is True
+    assert "bounds" in text
+    assert "cannot separate" in text
+    assert "not bounded" in str(summary["scope"])
+
+
+def test_summarize_ablation_immaterial_drop() -> None:
+    summary = summarize_ablation(_report(PERFECT), _report(PERFECT), removed="the gamma band")
+    assert summary["drop_headline_minus_ablated"] == pytest.approx(0.0)
+    assert summary["material"] is False
+    assert "within" in str(summary["interpretation"])
+
+
+def test_summarize_ablation_improvement_is_not_material() -> None:
+    summary = summarize_ablation(_report(HALF_RIGHT), _report(PERFECT), removed="the gamma band")
+    assert summary["drop_headline_minus_ablated"] == pytest.approx(-0.5)
+    assert summary["material"] is False
+    assert "raises" in str(summary["interpretation"])
+
+
+def test_summarize_ablation_rejects_incomparable_reports() -> None:
+    with pytest.raises(ValueError):
+        summarize_ablation(
+            _report(PERFECT), _report(PERFECT, split_kind="temporal"), removed="the gamma band"
+        )
 
 
 def test_write_report_artifacts(tmp_path: Path) -> None:
@@ -202,13 +238,18 @@ def test_summarize_quality_requires_provenance() -> None:
 
 
 def test_a_priori_thresholds_are_unchanged() -> None:
-    """Both thresholds were fixed before any model saw real data (D-016).
+    """All three thresholds were fixed before the runs they judge (D-016).
 
     If this fails, a threshold was edited. The fix is not updating this test: it is a
     new DECISIONS.md entry saying why, with results reported under both the old and
     the new value.
     """
-    from neuroauth.models.evaluation import CONTROL_MAX_CHANCE_RATIO, MATERIAL_DELTA
+    from neuroauth.models.evaluation import (
+        ABLATION_MATERIAL_DROP,
+        CONTROL_MAX_CHANCE_RATIO,
+        MATERIAL_DELTA,
+    )
 
     assert CONTROL_MAX_CHANCE_RATIO == 3.0
     assert MATERIAL_DELTA == 0.05
+    assert ABLATION_MATERIAL_DROP == 0.05

@@ -84,14 +84,24 @@ choice in the EEG-biometrics literature and generally scores higher.
 artifact — electrode impedance, cap placement, amplifier gain that day — is perfectly
 confounded with subject identity, because each subject appears in exactly one
 recording session. Absolute power carries those offsets straight into the feature
-vector, so a model can score well by recognizing that a recording has slightly higher
-broadband amplitude while learning nothing about the person. That is a leak wearing a
-feature's clothes, and it would not survive contact with a second session.
+vector, so a model can score well partly by recognizing a recording's broadband
+amplitude — a leak wearing a feature's clothes, which would not survive contact with a
+second session.
 
-**How the gap is reported.** If absolute scores materially higher, the delta is
-published with the interpretation attached: the excess is attributed to
-single-session amplitude confounds rather than to identity information. Quantifying
-the confound is a better result than the higher number would have been.
+Absolute amplitude also carries anatomy: skull thickness, tissue conductivity, head
+geometry. That part is person-specific and *would* survive a second session. With one
+session per subject, the two cannot be told apart.
+
+**How the gap is reported.** If absolute scores materially higher (D-016), the gap is
+published as what it is: amplitude information that cannot be separated from session
+artifacts, so the gap is an upper bound on their contribution — not a measure of it,
+and not evidence that none of it is identity. Bounding the confound honestly is a
+better result than the higher number would have been.
+
+*(The first version of this entry attributed the gap to session artifacts "rather than
+identity information". That claims a decomposition single-session data cannot
+support. Corrected on 2026-09-14, after the first full run and before the result was
+written up.)*
 
 **Known property.** The default bands tile 1–50 Hz without gaps, so relative values
 sum to 1.0 per channel and one band per channel is linearly dependent on the others.
@@ -143,6 +153,23 @@ most likely to carry the confound *before measuring it*, and removes the finding
 dedicated EOG channels (all 64 are scalp EEG), so this would mean ICA with frontal
 channels as a proxy, where choosing which components to remove is itself a judgment
 call. Disproportionate until the check shows a problem.
+
+**Outcome (full run from `b3450bf`, 2026-09-14): does not concentrate.** On the
+eyes-open-trained (cross-condition) models, Fp1/Fp2/AF7/AF8 carry 7.7% of impurity
+importance with relative power and 8.4% with absolute — 1.23× and 1.35× the 6.25% they
+would carry under uniform importance. Individually they rank 9th–20th of 64 channels,
+and 11–13% of random 4-channel groups carry at least as much. The models trained on
+both conditions (temporal split) put 6.6% and 5.5% there — 1.05× and 0.88×.
+
+The contrast runs in the direction the hypothesis predicts: more frontal weight when the
+training data is eyes-open, where blinks are frequent. The effect is too small to act
+on, so the frontal-excluded variant is not run. No a priori criterion for
+"concentrates" was set before the run; this judgment was made on these numbers and is
+recorded as such.
+
+The same run pointed elsewhere: in all four models the top channels are lateral-temporal
+(T9, T10, T7, T8) and gamma is the top band. That is followed up as a possible
+muscle-artifact confound in D-018.
 
 ---
 
@@ -419,20 +446,23 @@ the enrollable cohort only.
 
 ### D-016 — Evaluation thresholds fixed a priori
 
-**Decision.** Two thresholds were set on 2026-09-14, before any model had been fit on
-real EEG, and are **not to be adjusted after seeing results**:
+**Decision.** Three thresholds are fixed and **not to be adjusted after seeing
+results**. The first two were set on 2026-09-14, before any model had been fit on real
+EEG. The third was set after the first full run and before either ablation was run.
 
 | Threshold | Value | Constant | What it decides |
 |---|---|---|---|
 | Shuffled-label control ceiling | 3× chance | `CONTROL_MAX_CHANCE_RATIO` | A run whose control exceeds it writes no artifacts (D-007) |
-| Materiality of the absolute–relative gap | 0.05 macro-F1 | `MATERIAL_DELTA` | Above it, the gap is reported as a single-session amplitude confound (D-004) |
+| Materiality of the absolute–relative gap | 0.05 macro-F1 | `MATERIAL_DELTA` | Above it, the gap is reported as an upper bound on the session-artifact contribution (D-004) |
+| Materiality of an ablation drop | 0.05 macro-F1 | `ABLATION_MATERIAL_DROP` | Above it, the headline is reported as depending on the removed features (D-018) |
 
 **Why a priori.** A threshold chosen after seeing the numbers can be placed to make a
-control pass or a gap look immaterial, and nobody reading the result afterwards could
-tell. Fixing both before the first real-data run is what makes the pass/fail and the
-"material" label mean something.
+control pass, a gap look immaterial, or an ablation look harmless, and nobody reading
+the result afterwards could tell. Fixing each one before the run it judges is what
+makes the pass/fail and the "material" label mean something. The ablation threshold was
+set knowing the headline (0.378) but not what either ablation would score.
 
-**Enforcement.** `test_a_priori_thresholds_are_unchanged` pins both values. If it
+**Enforcement.** `test_a_priori_thresholds_are_unchanged` pins all three values. If it
 fails, the fix is not editing the test. It is a new entry here explaining why the value
 changed, with results reported under both the old and the new value.
 
@@ -470,3 +500,51 @@ see how pervasive the overlap is.
 **Also recorded.** The shuffled-label control on the leaky split — the real-data
 counterpart of `test_shuffled_control_cannot_detect_window_overlap_leakage`. If D-007
 holds, it reads near chance while the leaky score is inflated.
+
+---
+
+### D-018 — EMG ablations: bound the muscle-artifact contribution, don't decompose it
+
+**Why.** In the first full run, all four models put their top importance on
+lateral-temporal channels (T9, T10, T7, T8) and on the gamma band (38–48% of
+importance). The temporal electrodes sit over the temporalis muscle, and 30–50 Hz is
+where scalp muscle activity (EMG) shows up. Muscle tone and jaw habits are
+person-specific and stable within a sitting, so EMG would be the same class of
+single-session confound as amplitude (D-004) and eye movement (D-004b). The importance
+pattern fits that; it does not prove it.
+
+**Decision.** Two ablations of the headline model (relative power, eyes-open →
+eyes-closed), each with its own shuffled-label control, judged against a materiality
+threshold of 0.05 macro-F1 fixed before either was run (D-016):
+
+1. **Without gamma.** Gamma is removed from `FeatureConfig.bands` and features are
+   re-extracted, so relative power is renormalized over 1–30 Hz. Dropping the gamma
+   column alone would not remove it: relative bands sum to one per channel, so gamma
+   stays recoverable as one minus the other four
+   (`test_a_dropped_relative_gamma_column_is_still_recoverable`).
+2. **Without the temporal sites.** Every band at FT7, FT8, T7, T8, TP7, TP8, T9 and T10
+   is removed (`config.TEMPORAL_EMG_CHANNELS`). The set is anatomical — every lateral
+   temporal electrode in the montage — not the top of the importance ranking. Removing
+   columns is exact here because relative power is per channel and CAR is off (D-006).
+
+Results go to `artifacts/emg_ablation.json`.
+
+**How the outcome is framed: a bound, not a decomposition.** Gamma at temporal sites
+contains both muscle and neural activity, and scalp EEG cannot separate them. So:
+
+- A **material drop** means the headline depends on information unique to the removed
+  features, and the drop bounds that combined contribution from above. It does not say
+  how much of it is EMG.
+- A **drop within the threshold** means information unique to those features, muscle
+  and neural together, is not a material part of the headline.
+- **Either way the bound is scoped.** Muscle activity left in the retained features
+  (beta at temporal sites in the gamma ablation, gamma at other sites in the channel
+  ablation), and anything the forest recovers from correlated features, is not bounded
+  by this check.
+
+**Alternatives.** (a) Remove gamma and the temporal channels together: a bigger single
+cut, but it cannot show which of the two carries the dependence. Not run. (b) EMG
+removal by ICA or regression: component selection is itself a judgment call, and
+eegmmidb has no reference EMG channels. (c) Adding Iz, near the neck muscles, which
+also ranks high: it is not a temporal site, and adding it would shape the set around the
+ranking. Not tested.

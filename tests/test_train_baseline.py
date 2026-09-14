@@ -15,6 +15,7 @@ from scripts import train_baseline as driver
 
 from neuroauth.config import BANDS, Normalization
 from neuroauth.dsp.types import FeatureMatrix
+from neuroauth.models.ablation import bands_without, drop_channels
 from neuroauth.models.baseline import BaselineConfig
 from tests.synthetic import feature_matrix
 
@@ -26,11 +27,13 @@ N_WINDOWS = 30
 
 
 def _cohort(
-    normalization: Normalization, subjects: tuple[int, ...] = SUBJECTS
+    normalization: Normalization,
+    subjects: tuple[int, ...] = SUBJECTS,
+    bands: dict[str, tuple[float, float]] = BANDS,
 ) -> list[FeatureMatrix]:
     """Two recordings per subject around a subject-specific center."""
     prefix = "rel" if normalization == "relative" else "abs"
-    names = tuple(f"{prefix}:{channel}:{band}" for channel in CHANNELS for band in BANDS)
+    names = tuple(f"{prefix}:{channel}:{band}" for channel in CHANNELS for band in bands)
     rng = np.random.default_rng(0)
     centers = {subject: rng.normal(0.0, 3.0, size=len(names)) for subject in subjects}
     return [
@@ -47,6 +50,23 @@ def _cohort(
     ]
 
 
+def _ablations() -> list[driver.Ablation]:
+    return [
+        driver.Ablation(
+            name="without_gamma",
+            removed="the gamma band",
+            matrices=_cohort("relative", bands=bands_without(BANDS, ("gamma",))),
+            fingerprint="fp-without-gamma",
+        ),
+        driver.Ablation(
+            name="without_temporal_channels",
+            removed="C3 and C4",
+            matrices=[drop_channels(matrix, ("C3", "C4")) for matrix in _cohort("relative")],
+            fingerprint="fp-relative",
+        ),
+    ]
+
+
 def _run(
     tmp_path: Path, matrices: dict[Normalization, list[FeatureMatrix]] | None = None
 ) -> dict[str, Any]:
@@ -57,6 +77,7 @@ def _run(
         fingerprints={"relative": "fp-relative", "absolute_log": "fp-absolute"},
         window_s=2.0,
         baseline=FAST,
+        ablations=_ablations(),
         provenance={"git_head": "test-head"},
     )
 
@@ -78,6 +99,7 @@ def test_run_writes_every_artifact(tmp_path: Path) -> None:
         "importance.json",
         "quality_flag_rates.csv",
         "leakage_demonstration.json",
+        "emg_ablation.json",
         "run_summary.json",
     }
     assert {path.name for path in (tmp_path / "artifacts").iterdir()} == expected
@@ -89,6 +111,7 @@ def test_run_writes_every_artifact(tmp_path: Path) -> None:
     assert summary["a_priori_thresholds"] == {
         "control_max_chance_ratio": 3.0,
         "material_delta": 0.05,
+        "ablation_material_drop": 0.05,
     }
 
 
@@ -99,6 +122,14 @@ def test_no_artifact_mentions_accuracy(tmp_path: Path) -> None:
             assert "accuracy" not in path.read_text(encoding="utf-8").lower(), path.name
 
 
+def test_no_artifact_claims_the_gap_is_not_identity(tmp_path: Path) -> None:
+    """Single-session data cannot decompose the amplitude gap (D-004)."""
+    _run(tmp_path)
+    for path in (tmp_path / "artifacts").iterdir():
+        if path.suffix == ".json":
+            assert "rather than identity" not in path.read_text(encoding="utf-8"), path.name
+
+
 def test_leakage_demonstration_is_labelled_and_kept_apart(tmp_path: Path) -> None:
     summary = _run(tmp_path)
     out = tmp_path / "artifacts"
@@ -107,6 +138,21 @@ def test_leakage_demonstration_is_labelled_and_kept_apart(tmp_path: Path) -> Non
     assert leakage["leaky_test_windows_sharing_samples_with_train"] > 0
     assert not any(driver.LEAKY_SPLIT_KIND in path.name for path in out.iterdir())
     assert all(entry["split_kind"] in driver.SPLIT_KINDS for entry in summary["runs"])
+
+
+def test_emg_ablation_artifact_bounds_rather_than_decomposes(tmp_path: Path) -> None:
+    summary = _run(tmp_path)
+    out = tmp_path / "artifacts"
+    emg = json.loads((out / driver.EMG_ABLATION_ARTIFACT).read_text(encoding="utf-8"))
+    assert "cannot separate" in emg["framing"]
+    assert set(emg["ablations"]) == {"without_gamma", "without_temporal_channels"}
+    assert emg["ablations"]["without_gamma"]["n_features"] == len(CHANNELS) * 4
+    assert emg["ablations"]["without_temporal_channels"]["n_features"] == 4 * 5
+    for entry in emg["ablations"].values():
+        assert isinstance(entry["material"], bool)
+        assert entry["headline_macro_f1"] == pytest.approx(summary["headline"]["macro_f1"])
+        assert "not bounded" in entry["scope"]
+    assert set(summary["emg_ablation"]) == set(emg["ablations"])
 
 
 def test_importance_reports_frontal_share_against_uniform(tmp_path: Path) -> None:

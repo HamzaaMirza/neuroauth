@@ -1,14 +1,15 @@
 # PROGRESS — NeuroAuth
 
 **Current phase:** 1 — Signal pipeline + identification baseline
-**Status:** Baseline run committed (`6fa508d`). EMG ablations and the corrected
-absolute/relative wording are implemented and tested, **not yet committed or run**. The
-next full run regenerates every artifact from one commit and adds `emg_ablation.json`.
+**Status:** Final Phase 1 run complete from clean, pushed commit `fa98250`, with the EMG
+ablations. README results section written. **Exit criteria are met once the regenerated
+artifacts, README, and docs are committed.** Two checklist items remain off the exit
+path: Docker Compose and applying the Postgres schema.
 **Last updated:** 2026-09-14
 
 ---
 
-## Phase 1 results (full run from `b3450bf`, 89 enrollable subjects, chance 0.011)
+## Phase 1 results (89 enrollable subjects, chance 0.011)
 
 | Normalization | Split | Macro-F1 | Shuffled control (ceiling 0.034) |
 |---|---|---|---|
@@ -17,22 +18,19 @@ next full run regenerates every artifact from one commit and adds `emg_ablation.
 | absolute_log | cross-condition | 0.597 | 0.005 |
 | absolute_log | temporal | 0.956 | 0.015 |
 
-- **Brain-state change is the dominant effect.** Relative: 0.846 within condition vs
-  0.378 across. Headline per-subject F1: median 0.359, IQR 0.110–0.611.
-- **Absolute − relative:** +0.219 cross-condition, +0.110 temporal. Both material
-  (D-016). Reported as an upper bound on the session-artifact contribution — amplitude
-  also reflects anatomy, which one session cannot separate (D-004, corrected).
-- **Leakage demonstration (D-017):** guarded temporal 0.846 vs deliberately leaky random
-  0.906 (+0.060; apparent error 0.154 → 0.094). 90% of leaky test windows share samples
-  with training. Control on the leaky split: 0.011, i.e. chance (D-007 confirmed).
-- **Frontal EOG (D-004b): does not concentrate.** 1.23× / 1.35× uniform on eyes-open
-  models vs 1.05× / 0.88× on both-condition models. Right direction, too small to act
-  on. Frontal-excluded variant not run.
-- **Lateral-temporal gamma leads importance** in all four models → EMG ablations
-  (D-018), pending.
-- **Delta (D-005):** 13–15% on relative models, level with theta and alpha. Kept.
-- **Quality (D-015):** not-ok windows 5.7% eyes-open, 1.0% eyes-closed. S009 scores F1
-  0.81 on the headline — excluding flagged windows would have dropped it.
+- **Brain-state change is the dominant effect:** 0.846 within condition vs 0.378 across.
+- **Absolute − relative:** +0.219 / +0.110. Upper bound on the session-artifact
+  contribution; anatomy cannot be separated out (D-004).
+- **Leakage demonstration (D-017):** guarded 0.846 vs deliberately leaky 0.906; 90% of
+  leaky test windows share samples; control on the leaky split 0.011 (chance).
+- **Frontal EOG (D-004b):** does not concentrate; too small to act on.
+- **EMG ablations (D-018):** without gamma 0.263 (drop 0.116), without the temporal
+  sites 0.300 (drop 0.078). Both material; bounds, not EMG estimates. Importance
+  re-routes in each: without gamma, beta leads and temporal sites still top the channel
+  ranking; without the temporal sites, gamma still leads and Iz/frontal channels rise.
+- **Delta (D-005):** kept. **Quality (D-015):** flagged windows scored, not excluded.
+- **Reproducibility:** runs from `b3450bf` and `fa98250` produced byte-identical
+  baseline artifacts.
 
 ### Phase 2 expectation: the per-subject tail
 
@@ -46,19 +44,19 @@ number, and check whether the same subjects sit in both tails.
 
 ## Next up
 
-1. **Commit** the ablation work and the wording correction; push.
-2. **Full run** from that commit: regenerates all artifacts. The four baseline models
-   use fixed seeds, so their numbers should reproduce exactly — check that, then read
-   `emg_ablation.json`.
-3. **README results section**, framing the EMG outcome as a bound, not a decomposition.
-4. Commit artifacts → **Phase 1 exit criteria met**.
-5. Remaining Phase 1 checklist items off the exit path: Docker Compose, applying the
-   Postgres schema.
+1. **Commit** regenerated artifacts, README, and docs; push.
+2. **Phase 1 close-out:** install Docker, run Compose, implement `db/connection.py` and
+   `db/migrate.py`, apply `001_phase1_core.sql`, implement `ingest_subjects.py`
+   (asserting DB cohorts match the committed holdout file).
+3. Tick the Phase 1 checklist in `docs/ROADMAP.md`, then Phase 2.
 
 ---
 
 ## Open questions
 
+- **Combined EMG ablation (D-018).** Each single ablation leaves the other route open.
+  Removing gamma and the temporal sites together would bound the dependence on both at
+  once. Not run; if it is, fix its materiality threshold first.
 - **Phase 2: filter edge effects on short buffers.** Same preprocessing function on
   both paths, but `sosfiltfilt` edge transients differ between a 61 s recording and a
   short live buffer. D-001 removes code skew, not this.
@@ -82,7 +80,7 @@ number, and check whether the same subjects sit in both tails.
 
 ## Blockers
 
-None for the exit-criteria path. Docker install needed before Phase 1 closes.
+Docker is not installed; needed for the remaining Phase 1 checklist items.
 
 ---
 
@@ -95,22 +93,20 @@ None for the exit-criteria path. Docker install needed before Phase 1 closes.
 **Shipped:** `dsp/` (io, preprocess, windowing, features, pipeline) with tests;
 egg-info untracked. `drop_partial` removed; quality threshold 250 → 500 uV.
 `cohorts.py`, `scripts/select_holdout.py`, holdout committed alone and pushed.
-`models/splits.py`, `models/baseline.py`, `models/evaluation.py`.
+`models/splits.py`, `models/baseline.py`, `models/evaluation.py`, `models/ablation.py`.
 `config.fingerprint()`. Deliberately leaky split + overlap counting.
 `scripts/train_baseline.py` with holdout-committed and clean-tree preconditions.
-Smoke run, then the full baseline run (661 s) from `b3450bf`, committed as `6fa508d`.
-Then: `models/ablation.py`, EMG ablations in the driver, corrected absolute/relative
-wording. D-004 (corrected), D-004b (outcome), D-005 (outcome), D-007 (corrected),
-D-008 (updated), D-013–D-018.
-**Next:** Commit, full run with ablations, README results.
+Smoke run; full baseline run from `b3450bf` (committed `6fa508d`); final run with EMG
+ablations from `fa98250`. README results section. D-004 (corrected), D-004b, D-005,
+D-018 (outcomes), D-007 (corrected), D-008 (updated), D-013–D-018.
+**Next:** Commit; Docker/Postgres close-out.
 **Notes / decisions:** Band-power contract was wrong, fixed (D-013). Quality mask at
 250 uV flagged EOG and eyes-closed alpha; raised and made report-only (D-015). The
 shuffled-label control cannot detect overlap leakage (D-007), confirmed on real data
 (D-017). All evaluation thresholds fixed before the runs they judge (D-016). Headline
-0.378. Frontal EOG does not concentrate. The absolute/relative wording claimed a
-decomposition single-session data cannot support — corrected to an upper bound.
-Lateral-temporal gamma leads importance → two ablations, framed as bounds (D-018).
-User commits; never auto-commit.
+0.378. Frontal EOG does not concentrate. Absolute/relative wording corrected to an upper
+bound. Both EMG ablations material, reported as bounds with re-routing noted. Baseline
+artifacts reproduced byte for byte. User commits; never auto-commit.
 
 ### 2026-08-21
 **Phase:** 1

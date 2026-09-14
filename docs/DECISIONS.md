@@ -548,3 +548,28 @@ removal by ICA or regression: component selection is itself a judgment call, and
 eegmmidb has no reference EMG channels. (c) Adding Iz, near the neck muscles, which
 also ranks high: it is not a temporal site, and adding it would shape the set around the
 ranking. Not tested.
+
+**Outcome (full run from `fa98250`, 2026-09-14): both drops material.**
+
+| Headline model | Macro-F1 | Drop | Shuffled-label control |
+|---|---|---|---|
+| all features | 0.378 | — | 0.009 |
+| without gamma | 0.263 | 0.116 | 0.009 |
+| without the temporal sites | 0.300 | 0.078 | 0.007 |
+
+Read as bounds: at most 0.116 of the headline comes from information unique to the
+gamma band, and at most 0.078 from information unique to the eight temporal sites —
+muscle and neural together in each case. Neither number is an estimate of EMG.
+
+The importance shift makes the scope limit concrete. Without gamma, beta becomes the
+top band (40%, up from 19%) and the temporal sites still lead the channel ranking.
+Without the temporal sites, gamma stays the top band (38%), and Iz and the frontal
+AF7/AF8 move to the top of the channel ranking. (Importance is recorded per band and per
+channel, not per channel-band pair, so which channels carry the remaining gamma is not
+known.) Each ablation leaves the other route open, so neither drop bounds the
+model's dependence on temporal-site or high-frequency features as a whole. Removing
+both together (alternative (a)) is the check that would. It has not been run, and if
+it is, its materiality threshold has to be fixed first.
+
+The same run reproduced all four baseline models' artifacts byte for byte against the
+`b3450bf` run.

@@ -1,59 +1,76 @@
 # PROGRESS — NeuroAuth
 
 **Current phase:** 1 — Signal pipeline + identification baseline
-**Status:** Phase 1 code complete. A 5-subject smoke run passed end to end on real EEG.
-The full run is next, and needs a clean working tree first: the driver refuses to write
-`artifacts/` from uncommitted code.
+**Status:** Full run complete from clean, pushed commit `b3450bf`. Every shuffled-label
+control passed. Artifacts written to `artifacts/`, **not yet committed**. The README
+results section waits on two decisions (below).
 **Last updated:** 2026-09-14
 
 ---
 
-## Where things stand
+## Phase 1 results (full run, 89 enrollable subjects, chance 0.011)
 
-- **Impostor holdout** — `config/impostor_holdout.json`, committed alone in `1f25cd2`
-  and pushed to `origin/main` before any model touched real EEG (D-008).
-- **`dsp/`** — io, preprocess, windowing, features, and now `pipeline.py`.
-- **`config.fingerprint()`** — canonical SHA-256, band order included, stable across
-  processes.
-- **`models/`** — splits (temporal with guard, cross-condition, the deliberately leaky
-  random split, overlap counting), baseline, evaluation. Committed in `a396033` except
-  this session's additions.
-- **`scripts/train_baseline.py`** — four evaluations plus the leakage demonstration.
-  Checked before any EEG loads: the holdout file is in HEAD and unmodified, and writing
-  `artifacts/` requires a clean tree. Every shuffled-label control is gated before any
-  artifact is written. Records git HEAD, a dirty flag, config fingerprints, split
-  parameters, the a priori thresholds, and package versions.
-- **Tests:** 185. mypy strict clean across `src/neuroauth`.
-- **Smoke run** (5 subjects, scratchpad only, 17 s): every artifact produced and
-  rendered. Too few subjects for the numbers to mean anything. One control read 0.41
-  against chance 0.20 — inside the ceiling, but it showed the control is noisier than
-  D-007 first claimed. D-007 was corrected before the full run.
+| Normalization | Split | Macro-F1 | Shuffled control (ceiling 0.034) |
+|---|---|---|---|
+| **relative** | **cross-condition (headline)** | **0.378** | 0.009 |
+| relative | temporal | 0.846 | 0.010 |
+| absolute_log | cross-condition | 0.597 | 0.005 |
+| absolute_log | temporal | 0.956 | 0.015 |
+
+- **Brain-state change is the dominant effect.** Relative: 0.846 within condition vs
+  0.378 across. Headline per-subject F1: median 0.359, IQR 0.110–0.611, 14 of 89
+  subjects at 0.
+- **Absolute − relative:** +0.219 cross-condition, +0.110 temporal. Both over the 0.05
+  materiality threshold (D-016). The temporal gap is compressed by the ceiling.
+- **Leakage demonstration (D-017):** guarded temporal 0.846 vs deliberately leaky
+  random 0.906 (+0.060; apparent error 0.154 → 0.094). 90% of leaky test windows share
+  samples with training. The control on the leaky split reads 0.011 — chance —
+  confirming on real data that it cannot see this leak (D-007).
+- **Frontal EOG (D-004b):** eyes-open-trained models put 1.23× (relative) and 1.35×
+  (absolute) the uniform share on Fp1/Fp2/AF7/AF8. Those channels rank 9th–20th of
+  64, and 11–13% of random 4-channel groups carry as much. Models trained on both
+  conditions: 1.05× and 0.88×. The direction fits the hypothesis; the size is modest.
+  No a priori criterion for "concentrates" was set.
+- **Top importance is lateral-temporal and gamma** in all four models: T9, T10, T7,
+  T8, TP7/TP8, FT8 and Iz lead; gamma is the top band (38–48%). Open question below.
+- **Delta (D-005):** 13–15% on relative models, level with theta and alpha. Kept.
+- **Quality (D-015):** not-ok windows 5.7% eyes-open, 1.0% eyes-closed; frontal flags
+  20.2% vs 1.4%. S009 — which lost every window at 250 uV — scores F1 0.81 on the
+  headline. Excluding flagged windows would have removed a well-identified subject.
+- **Provenance:** `git_head` b3450bf, `git_dirty` false, fingerprints
+  relative 3d3c06755c838642 / absolute_log be030ad69d2fd7a3.
 
 ---
 
 ## Next up
 
-1. **Commit the current work** and push.
-2. **Full run:** `python -m scripts.train_baseline` → `artifacts/`.
-3. **Review before writing anything up:**
-   - every shuffled-label control against its 3× ceiling (D-007, D-016)
-   - absolute vs relative gap against 0.05 (D-004, D-016)
-   - frontal importance share vs 6.25% uniform on the eyes-open models (D-004b)
-   - delta band importance (D-005)
-   - leaky-minus-honest inflation (D-017)
-4. README results section; commit artifacts → **exit criteria met**.
-
-**Deferred this weekend:** Docker Compose, `db/`, migrations, `ingest_subjects.py`.
+1. **Commit `artifacts/` on its own** (produced by `b3450bf`), then push.
+2. **Decide the absolute/relative wording** before it reaches the README (open question).
+3. **Decide on an EMG check** (open question). If yes: fix the comparison criterion
+   before running, as D-016 did.
+4. **Decide on the frontal-excluded variant** (D-004b). Current read: not warranted.
+5. README results section → **Phase 1 exit criteria met**.
+6. Remaining Phase 1 checklist items off the exit path: Docker Compose, applying the
+   Postgres schema.
 
 ---
 
 ## Open questions
 
-- **Frontal-excluded variant (D-004b).** Built only if frontal importance concentrates
-  on the eyes-open-trained models.
-- **Control false alarms (D-007).** A clean pipeline can occasionally breach 3× chance.
-  If the full run fails a control: investigate and document, don't re-roll seeds or
-  move the ceiling.
+- **Absolute/relative interpretation wording.** The generated text says the gap is
+  "consistent with recording-level amplitude confounds … rather than identity
+  information". The first half holds. The second overclaims: absolute amplitude also
+  reflects anatomy — skull thickness, tissue conductivity, head geometry — which is
+  person-specific and would survive a second session. Single-session data cannot
+  separate the two, so the gap is an upper bound on the session-artifact
+  contribution, not a measure of it.
+- **Muscle artifact (EMG) as a third confound.** Gamma (30–50 Hz) at lateral-temporal
+  electrodes (T9/T10/T7/T8 sit over the temporalis muscle) and at Iz (near neck
+  muscles) is where scalp EMG shows up. Muscle tone and jaw habits are person-specific
+  and stable within a sitting — the same class of confound as D-004 and D-004b. The
+  importance pattern fits that; it does not prove it. A check could drop the gamma
+  band, drop the temporal-edge channels, or both, and report each against the
+  headline.
 - **Phase 2: filter edge effects on short buffers.** Same preprocessing function on
   both paths, but `sosfiltfilt` edge transients differ between a 61 s recording and a
   short live buffer. D-001 removes code skew, not this.
@@ -93,17 +110,16 @@ egg-info untracked. `drop_partial` removed; quality threshold 250 → 500 uV.
 `models/splits.py`, `models/baseline.py`, `models/evaluation.py`.
 `config.fingerprint()`. Deliberately leaky split + overlap counting.
 `scripts/train_baseline.py` with holdout-committed and clean-tree preconditions.
-5-subject smoke run. D-004b, D-008 (updated), D-013–D-017; D-007 corrected twice.
-**Next:** Commit, full run, review, README results.
+Smoke run, then the full run (661 s) from `b3450bf`. D-004b, D-008 (updated),
+D-013–D-017; D-005 outcome; D-007 corrected twice.
+**Next:** Commit artifacts; decide wording, EMG check, frontal variant; README results.
 **Notes / decisions:** Band-power contract was wrong, fixed (D-013). Quality mask at
-250 uV flagged EOG and eyes-closed alpha; raised and made report-only (D-015). Frontal
-EOG is a second single-session confound that relative power does not remove (D-004b).
-The shuffled-label control cannot detect overlap leakage (D-007 correction, with a
-synthetic demonstration); a labelled leaky split measures that on real data (D-017).
-Both evaluation thresholds fixed a priori and pinned by a test (D-016). Smoke run
-showed the control is noisier than first estimated; D-007 corrected before the full
-run. Holdout subject 3 was in pre-selection quality statistics; disclosed. User
-commits; never auto-commit.
+250 uV flagged EOG and eyes-closed alpha; raised and made report-only (D-015). The
+shuffled-label control cannot detect overlap leakage (D-007), confirmed on real data by
+the leakage demonstration (D-017). Both evaluation thresholds fixed a priori (D-016).
+Full run: headline 0.378 (34× chance); the brain-state change is the dominant effect;
+absolute power is materially higher; frontal EOG signal modest; lateral-temporal gamma
+leads importance — possible EMG confound, open. User commits; never auto-commit.
 
 ### 2026-08-21
 **Phase:** 1

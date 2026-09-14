@@ -164,6 +164,13 @@ one unaveraged estimate at 0.5 Hz for band-power stability.
 aggregate feature importance once the baseline is fitted (`band_importance`); if it
 contributes nothing, drop the band and record the result here.
 
+**Outcome (full run from `b3450bf`, 2026-09-14).** Delta carries 13.4% of impurity
+importance on the relative cross-condition model and 14.5% on the relative temporal
+model — level with theta (13.2%, 14.2%) and alpha (14.1%, 14.3%). On the absolute
+models it carries 6.8% and 9.6%. It is not contributing nothing, so it stays. Caveat:
+relative band powers sum to one per channel, so importance is shared across linearly
+dependent columns. This is a screen, not proof that delta adds information.
+
 ---
 
 ### D-006 — Common average reference off in Phase 1

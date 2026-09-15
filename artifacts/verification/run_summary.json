@@ -1,0 +1,616 @@
+{
+  "git_head": "72a1b1e0c2773d9698d04583d992b8924081f2ce",
+  "git_dirty": false,
+  "holdout_record": {
+    "path": "config/impostor_holdout.json",
+    "selected_at_utc": "2026-09-14T14:06:19+00:00",
+    "seed": 20260821
+  },
+  "versions": {
+    "python": "3.13.7",
+    "numpy": "2.5.2",
+    "scipy": "1.18.0",
+    "scikit_learn": "1.9.0",
+    "mne": "1.12.1"
+  },
+  "what_this_is": "Phase 2 open-set verification. Headline: FRR at FAR = 0.01, cross-condition, protected domain, held-out impostors. FAR = 0.001 is reported and flagged under-resolved. See docs/DECISIONS.md D-020 to D-022.",
+  "partial_run": false,
+  "enrollable_subjects": [
+    1,
+    2,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    19,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    33,
+    34,
+    37,
+    39,
+    40,
+    41,
+    42,
+    43,
+    44,
+    45,
+    46,
+    47,
+    48,
+    50,
+    51,
+    52,
+    53,
+    54,
+    55,
+    56,
+    57,
+    58,
+    59,
+    60,
+    61,
+    62,
+    63,
+    64,
+    66,
+    67,
+    68,
+    69,
+    70,
+    71,
+    72,
+    73,
+    74,
+    76,
+    77,
+    78,
+    80,
+    81,
+    83,
+    84,
+    85,
+    88,
+    89,
+    90,
+    91,
+    92,
+    93,
+    94,
+    95,
+    98,
+    99,
+    100,
+    101,
+    102,
+    103,
+    104,
+    108,
+    109
+  ],
+  "impostor_holdout_used": [
+    3,
+    11,
+    18,
+    20,
+    21,
+    35,
+    36,
+    38,
+    49,
+    65,
+    75,
+    79,
+    82,
+    86,
+    87,
+    96,
+    97,
+    105,
+    106,
+    107
+  ],
+  "folds": [
+    [
+      2,
+      9,
+      15,
+      26,
+      32,
+      51,
+      53,
+      58,
+      59,
+      64,
+      68,
+      69,
+      71,
+      72,
+      80,
+      89,
+      92,
+      94
+    ],
+    [
+      1,
+      7,
+      10,
+      19,
+      27,
+      37,
+      43,
+      44,
+      46,
+      54,
+      61,
+      83,
+      85,
+      90,
+      100,
+      102,
+      104,
+      108
+    ],
+    [
+      5,
+      8,
+      13,
+      23,
+      24,
+      28,
+      34,
+      47,
+      48,
+      66,
+      70,
+      73,
+      77,
+      78,
+      81,
+      91,
+      93,
+      98
+    ],
+    [
+      4,
+      6,
+      12,
+      14,
+      16,
+      29,
+      30,
+      31,
+      33,
+      41,
+      45,
+      56,
+      62,
+      67,
+      84,
+      88,
+      99,
+      103
+    ],
+    [
+      17,
+      22,
+      25,
+      39,
+      40,
+      42,
+      50,
+      52,
+      55,
+      57,
+      60,
+      63,
+      74,
+      76,
+      95,
+      101,
+      109
+    ]
+  ],
+  "splits": {
+    "cross_condition": {
+      "headline_frr_at_far": {
+        "threshold": 0.6875,
+        "far": 0.006727515538552681,
+        "frr": 0.5521669341894061,
+        "target_far": 0.01,
+        "under_resolved": false
+      },
+      "eer": {
+        "protected": 0.1647271268057785,
+        "embedding": 0.09048956661316213,
+        "decision": 0.14206102961110945
+      },
+      "eer_ci95_protected": [
+        0.12339486356340289,
+        0.18359628609221842
+      ],
+      "frr_at_far": {
+        "protected": [
+          {
+            "threshold": 0.6875,
+            "far": 0.006727515538552681,
+            "frr": 0.5521669341894061,
+            "target_far": 0.01,
+            "under_resolved": false
+          },
+          {
+            "threshold": 0.734375,
+            "far": 0.000943860388990973,
+            "frr": 0.7692616372391653,
+            "target_far": 0.001,
+            "under_resolved": true
+          }
+        ],
+        "embedding": [
+          {
+            "threshold": 0.4077650061818027,
+            "far": 0.00999086262814913,
+            "frr": 0.3073836276083467,
+            "target_far": 0.01,
+            "under_resolved": false
+          },
+          {
+            "threshold": 0.5258268873387578,
+            "far": 0.0009940657288309185,
+            "frr": 0.5347110754414125,
+            "target_far": 0.001,
+            "under_resolved": true
+          }
+        ],
+        "decision": [
+          {
+            "threshold": 2.63174393829047,
+            "far": 0.009810123404725327,
+            "frr": 0.5278892455858748,
+            "target_far": 0.01,
+            "under_resolved": false
+          },
+          {
+            "threshold": 4.208109528112943,
+            "far": 0.0009739835928949403,
+            "frr": 0.7943418940609952,
+            "target_far": 0.001,
+            "under_resolved": true
+          }
+        ]
+      },
+      "deployed_at_cohort_threshold": {
+        "protected": {
+          "threshold": 0.6875,
+          "far": 0.006727515538552681,
+          "frr": 0.5521669341894061,
+          "target_far": null,
+          "under_resolved": null
+        },
+        "embedding": {
+          "threshold": 0.3858716827383332,
+          "far": 0.013756263116145034,
+          "frr": 0.2710674157303371,
+          "target_far": null,
+          "under_resolved": null
+        },
+        "decision": {
+          "threshold": 2.598440865829423,
+          "far": 0.01053308029842054,
+          "frr": 0.5224719101123596,
+          "target_far": null,
+          "under_resolved": null
+        }
+      },
+      "cohort_selected_thresholds": {
+        "protected": {
+          "threshold": 0.6875,
+          "far": 0.0064815699006875475,
+          "frr": 0.5521669341894061,
+          "target_far": 0.01,
+          "under_resolved": false
+        },
+        "embedding": {
+          "threshold": 0.3858716827383332,
+          "far": 0.009990928189457602,
+          "frr": 0.2710674157303371,
+          "target_far": 0.01,
+          "under_resolved": false
+        },
+        "decision": {
+          "threshold": 2.598440865829423,
+          "far": 0.009990928189457602,
+          "frr": 0.5224719101123596,
+          "target_far": 0.01,
+          "under_resolved": false
+        }
+      },
+      "random_pairing_control_eer": {
+        "protected_impostor_holdout": 0.5076243980738363,
+        "protected_cohort": 0.5076243980738363,
+        "embedding_impostor_holdout": 0.45746388443017655,
+        "embedding_cohort": 0.45746388443017655,
+        "decision_impostor_holdout": 0.48996789727126805,
+        "decision_cohort": 0.48996789727126805
+      },
+      "protection_cost_eer": 0.07423756019261638,
+      "protection_cost_material": true,
+      "revocation": {
+        "mean_bit_agreement": 0.4920997191011236,
+        "fraction_accepted_at_cohort_threshold": 0.0,
+        "agreement_band": [
+          0.45,
+          0.55
+        ],
+        "max_accepted_fraction": 0.03,
+        "works": true
+      },
+      "failed_to_enroll": [],
+      "n_impostor_pairs": 1780,
+      "representation_versions": {
+        "0": "sha256:1dae4598bcbac693",
+        "1": "sha256:e51f12fa9bbe4d63",
+        "2": "sha256:31d16ae16d3eda48",
+        "3": "sha256:b2d4680724e84c7d",
+        "4": "sha256:2639849433b464c0"
+      },
+      "embedding_versions": {
+        "0": "sha256:ef5bc0c360f21ef3",
+        "1": "sha256:df0b5284dd927b34",
+        "2": "sha256:c5376ed9e3b40c0a",
+        "3": "sha256:097c4bbcf76ba3b4",
+        "4": "sha256:251752ac7d7a6ef1"
+      },
+      "decision_versions": [
+        "sha256:c616e6fc38f54860",
+        "sha256:01f873b857f180d7",
+        "sha256:349d343d8c32246e",
+        "sha256:c050e5aafef8e203",
+        "sha256:05035b355a97672f"
+      ]
+    },
+    "temporal": {
+      "headline_frr_at_far": {
+        "threshold": 0.6875,
+        "far": 0.008547351524879615,
+        "frr": 0.19484702093397746,
+        "target_far": 0.01,
+        "under_resolved": false
+      },
+      "eer": {
+        "protected": 0.058587479935794544,
+        "embedding": 0.029790660225442835,
+        "decision": 0.05394524959742351
+      },
+      "eer_ci95_protected": [
+        0.04646769662921349,
+        0.08199687000015532
+      ],
+      "frr_at_far": {
+        "protected": [
+          {
+            "threshold": 0.6875,
+            "far": 0.008547351524879615,
+            "frr": 0.19484702093397746,
+            "target_far": 0.01,
+            "under_resolved": false
+          },
+          {
+            "threshold": 0.75,
+            "far": 0.0007223113964686999,
+            "frr": 0.4331723027375201,
+            "target_far": 0.001,
+            "under_resolved": true
+          }
+        ],
+        "embedding": [
+          {
+            "threshold": 0.43253423728990936,
+            "far": 0.009991974317817015,
+            "frr": 0.06360708534621579,
+            "target_far": 0.01,
+            "under_resolved": false
+          },
+          {
+            "threshold": 0.5921668561408994,
+            "far": 0.0009630818619582664,
+            "frr": 0.21658615136876005,
+            "target_far": 0.001,
+            "under_resolved": true
+          }
+        ],
+        "decision": [
+          {
+            "threshold": 2.4399711651915554,
+            "far": 0.009991974317817015,
+            "frr": 0.19806763285024154,
+            "target_far": 0.01,
+            "under_resolved": false
+          },
+          {
+            "threshold": 4.714217241071591,
+            "far": 0.0008426966292134832,
+            "frr": 0.5177133655394525,
+            "target_far": 0.001,
+            "under_resolved": true
+          }
+        ]
+      },
+      "deployed_at_cohort_threshold": {
+        "protected": {
+          "threshold": 0.6875,
+          "far": 0.008547351524879615,
+          "frr": 0.19484702093397746,
+          "target_far": null,
+          "under_resolved": null
+        },
+        "embedding": {
+          "threshold": 0.39069224599425695,
+          "far": 0.017776886035313,
+          "frr": 0.0426731078904992,
+          "target_far": null,
+          "under_resolved": null
+        },
+        "decision": {
+          "threshold": 2.2845916299050306,
+          "far": 0.010874799357945426,
+          "frr": 0.17632850241545894,
+          "target_far": null,
+          "under_resolved": null
+        }
+      },
+      "cohort_selected_thresholds": {
+        "protected": {
+          "threshold": 0.6875,
+          "far": 0.00728073956986157,
+          "frr": 0.19484702093397746,
+          "target_far": 0.01,
+          "under_resolved": false
+        },
+        "embedding": {
+          "threshold": 0.39069224599425695,
+          "far": 0.00996311730612636,
+          "frr": 0.0426731078904992,
+          "target_far": 0.01,
+          "under_resolved": false
+        },
+        "decision": {
+          "threshold": 2.2845916299050306,
+          "far": 0.00996311730612636,
+          "frr": 0.17632850241545894,
+          "target_far": 0.01,
+          "under_resolved": false
+        }
+      },
+      "random_pairing_control_eer": {
+        "protected_impostor_holdout": 0.5491143317230274,
+        "protected_cohort": 0.5491143317230274,
+        "embedding_impostor_holdout": 0.49355877616747185,
+        "embedding_cohort": 0.49355877616747185,
+        "decision_impostor_holdout": 0.5124228481651891,
+        "decision_cohort": 0.5124228481651891
+      },
+      "protection_cost_eer": 0.02879681971035171,
+      "protection_cost_material": true,
+      "revocation": {
+        "mean_bit_agreement": 0.4945575842696629,
+        "fraction_accepted_at_cohort_threshold": 0.0,
+        "agreement_band": [
+          0.45,
+          0.55
+        ],
+        "max_accepted_fraction": 0.03,
+        "works": true
+      },
+      "failed_to_enroll": [],
+      "n_impostor_pairs": 1780,
+      "representation_versions": {
+        "0": "sha256:1dae4598bcbac693",
+        "1": "sha256:e51f12fa9bbe4d63",
+        "2": "sha256:31d16ae16d3eda48",
+        "3": "sha256:b2d4680724e84c7d",
+        "4": "sha256:2639849433b464c0"
+      },
+      "embedding_versions": {
+        "0": "sha256:ef5bc0c360f21ef3",
+        "1": "sha256:df0b5284dd927b34",
+        "2": "sha256:c5376ed9e3b40c0a",
+        "3": "sha256:097c4bbcf76ba3b4",
+        "4": "sha256:251752ac7d7a6ef1"
+      },
+      "decision_versions": [
+        "sha256:883b565305a2c2da",
+        "sha256:22dcc66aabf49130",
+        "sha256:8e59fa92df3f2806",
+        "sha256:93e8be8b4ad21c6d",
+        "sha256:375ea883cf27ca58"
+      ]
+    }
+  },
+  "predictions": {
+    "table": "cross_condition x protected x impostor_holdout",
+    "partial_run": false,
+    "P1a_heavy_tail": {
+      "verdict": "confirmed",
+      "median_per_subject_eer": 0.10714285714285714,
+      "worst_decile_mean_eer": 0.39472956296012596,
+      "worst_decile_subjects": [
+        108,
+        68,
+        27,
+        44,
+        10,
+        4,
+        43,
+        50,
+        93
+      ]
+    },
+    "P1b_concordance_with_phase1_f1": {
+      "spearman_rho": -0.6289453922043503,
+      "p_value": 9.999000099990002e-05,
+      "n_subjects": 89,
+      "zero_f1_subjects": [
+        4,
+        10,
+        13,
+        22,
+        23,
+        24,
+        27,
+        29,
+        44,
+        50,
+        54,
+        78,
+        81,
+        108
+      ],
+      "zero_f1_in_worst_quartile": 10,
+      "expected_in_worst_quartile_by_chance": 3.5,
+      "verdict": "confirmed",
+      "caveat": "Both phases score the same recordings, so a subject with a poor eyes-closed recording can land in both tails without identity features being the reason."
+    },
+    "P2_emg_cross_session": "not testable on single-session data; nothing here bears on it"
+  },
+  "algorithms": {
+    "embedding": "log-relative/standardize/shrinkage-lda/center-v1",
+    "transform": "biohash-shake256-v1",
+    "decision": "logistic-v0/similarity,template-z,window-ok"
+  },
+  "streaming_fingerprint": "bdef08efada10679",
+  "a_priori": {
+    "far_targets": [
+      0.01,
+      0.001
+    ],
+    "headline_far": 0.01,
+    "min_expected_errors": 3.0,
+    "threshold_selection_far": 0.01,
+    "random_pairing_control_min_eer": 0.4,
+    "protection_material_eer_cost": 0.02,
+    "n_folds": 5,
+    "fold_seed": 20260915,
+    "pairing_control_seed": 20260918,
+    "n_bootstrap": 2000,
+    "bootstrap_seed": 20260916
+  }
+}

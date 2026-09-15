@@ -1,0 +1,80 @@
+{
+  "split_kind": "temporal",
+  "domain": "decision",
+  "impostor_source": "cohort",
+  "headline_frr_at_far": {
+    "threshold": 2.2845916299050306,
+    "far": 0.00996311730612636,
+    "frr": 0.17632850241545894,
+    "target_far": 0.01,
+    "under_resolved": false
+  },
+  "eer": 0.05394524959742351,
+  "eer_point": {
+    "threshold": 0.32099922603898756,
+    "far": 0.05383915313502898,
+    "frr": 0.05394524959742351,
+    "target_far": null,
+    "under_resolved": null
+  },
+  "eer_ci95": null,
+  "frr_at_far": [
+    {
+      "threshold": 2.2845916299050306,
+      "far": 0.00996311730612636,
+      "frr": 0.17632850241545894,
+      "target_far": 0.01,
+      "under_resolved": false
+    },
+    {
+      "threshold": 4.650741224604795,
+      "far": 0.0009579920486659961,
+      "frr": 0.49597423510466987,
+      "target_far": 0.001,
+      "under_resolved": true
+    }
+  ],
+  "deployed_at_cohort_threshold": null,
+  "tail": {
+    "n_subjects": 89,
+    "median": 0.02242152466367713,
+    "p90": 0.14285714285714285,
+    "worst_decile_mean": 0.19379164095016535,
+    "worst_decile_subjects": [
+      68,
+      43,
+      52,
+      64,
+      19,
+      30,
+      41,
+      70,
+      72
+    ],
+    "pooled_eer": 0.05394524959742351,
+    "heavy_tail": true
+  },
+  "random_pairing_control_eer": 0.5124228481651891,
+  "n_genuine_scores": 1242,
+  "n_impostor_scores": 20877,
+  "n_claimed_subjects": 89,
+  "n_impostor_subjects": 89,
+  "n_impostor_pairs": 1496,
+  "n_probe_not_ok": 53,
+  "n_failure_to_enroll": 0,
+  "representation_versions": [
+    "sha256:1dae4598bcbac693",
+    "sha256:e51f12fa9bbe4d63",
+    "sha256:31d16ae16d3eda48",
+    "sha256:b2d4680724e84c7d",
+    "sha256:2639849433b464c0"
+  ],
+  "decision_versions": [
+    "sha256:883b565305a2c2da",
+    "sha256:22dcc66aabf49130",
+    "sha256:8e59fa92df3f2806",
+    "sha256:93e8be8b4ad21c6d",
+    "sha256:375ea883cf27ca58"
+  ],
+  "streaming_fingerprint": "bdef08efada10679"
+}

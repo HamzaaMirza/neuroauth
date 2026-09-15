@@ -960,3 +960,76 @@ secrecy. Open question 5 of the contracts review is resolved this way.
 - **Fuzzy commitment, fuzzy vault, or homomorphic matching.** Each needs error-correcting
   code design for noisy EEG, or cryptographic machinery the scale does not justify (hard
   rule 7).
+
+---
+
+### D-024 — Phase 2 reporting: EER headline chosen after the results; the tail as a primary result
+
+**Decision.**
+
+1. The reported headline is EER, stated with the FAR and FRR at its threshold. The
+   registered headline, FRR at FAR 1%, stays in the same table.
+2. The per-subject EER tail gets its own results section rather than a caveat.
+3. Every analysis requested after the results is labelled post hoc and descriptive.
+
+**This change came after the results, and is recorded as such.** D-022 registered FRR at
+FAR 1% as the headline, and `HEADLINE_FAR` is still pinned by its test. The run (`72a1b1e`,
+clean tree) produced:
+
+- EER 16.5% [12.3–18.4] at threshold 0.59375, where FAR is 11.8% and FRR is 16.5%;
+- FRR 55.2% at threshold 0.6875 for the FAR 1% target.
+
+The author then moved the headline to EER. The stated reason is that the FAR 1% point sits
+far past the EER crossover, where FRR climbs quickly, for a window-level security target the
+system was not asked to meet. That reason post-dates the number. D-016's rule for a changed
+value applies: explain the change, and report results under both the old and the new choice.
+Accordingly:
+
+- nothing that judges a result has changed;
+- both numbers appear side by side in the headline table;
+- the README states the timing next to the headline;
+- `run_summary.json` still records the headline as registered at run time, which is the
+  correct provenance.
+
+**What a reader should weigh.**
+
+- **At the EER point**, about one impostor window in 8.5 is accepted. That is the security
+  cost the EER headline leaves unspoken.
+- **At FAR 1%**, more than half of genuine windows are rejected.
+- **Both are window-level.** Sessions integrate windows and have not been evaluated, so
+  neither number describes what a user experiences.
+
+**Alternatives.**
+
+- **Keep FRR at FAR 1% as the headline.** It was registered, and it is the security-relevant
+  window-level number. Not chosen, by the author's call.
+- **Report EER alone.** Rejected. Hard rule 2 requires FRR at a fixed FAR in every
+  evaluation output, and EER alone would hide the security side.
+
+**Post-hoc analyses, reported as descriptive.** All come from
+`scripts/report_verification_tail.py`, which reads committed artifacts only.
+
+- **Overlap with Phase 1.** 6 of the 9 worst-decile subjects scored F1 = 0 in Phase 1 (1.4
+  expected; hypergeometric p = 3×10⁻⁴), and 8 of 9 scored below 0.1. This sits alongside the
+  registered P1b result (ρ = −0.63, confirmed; 10 of 14 zero-F1 subjects in the worst
+  quartile against 3.5 expected).
+- **Cross-split check.** 7 of the 9 worst-decile subjects verify within eyes-open at a
+  per-subject EER below 10%. Only S043 and S068 fall in the worst decile of both splits (0.9
+  expected; p = 0.22). The per-subject rank correlation across splits is ρ = 0.48, and the
+  within-state estimates rest on 13–14 genuine windows each.
+- **Oracle bound.** The mean per-subject EER is 13.2%. With equal counts per subject, the
+  pooled FAR and FRR under each subject's own best threshold are both at most that.
+
+**How the tail may be interpreted.** The phases agree because two models and two task
+framings fail on the same people, which rules out a classifier artifact or a
+closed-set-framing artifact. It does not make the failure a fixed property of the person.
+Both phases share the recordings, the features, and the eyes-open → eyes-closed structure, and
+the within-state split shows most of these subjects verify well without the state change. The
+supported reading is a property of the subject together with the state change. The unsupported
+reading is "these people cannot be verified." Neither separates a person from their single
+recording session.
+
+**The 2.8× degradation** (EER 5.9% within eyes-open against 16.5% across) goes the same way
+as Phase 1 (0.846 against 0.378). It is the same effect seen under a second model and task
+framing on shared data, not an independent replication. The ratios are on different metrics
+and are not compared numerically.

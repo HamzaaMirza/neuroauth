@@ -294,7 +294,7 @@ def run(
             title=f"DET: {split.replace('_', '-')} split, impostor holdout",
             subtitle=(
                 f"{len(enrollable)} enrolled subjects, {len(holdout)} held-out impostors, "
-                f"{N_FOLDS} subject-disjoint folds. Headline marker at FAR {HEADLINE_FAR:.0%}."
+                f"{N_FOLDS} subject-disjoint folds. Marker at FAR {HEADLINE_FAR:.0%}."
             ),
             eer_points={d: r.eer for d, r in holdout_reports.items()},
         )
@@ -332,9 +332,10 @@ def run(
     summary = {
         **provenance,
         "what_this_is": (
-            "Phase 2 open-set verification. Headline: FRR at FAR = 0.01, cross-condition, "
-            "protected domain, held-out impostors. FAR = 0.001 is reported and flagged "
-            "under-resolved. See docs/DECISIONS.md D-020 to D-022."
+            "Phase 2 open-set verification, cross-condition, protected domain, held-out "
+            "impostors. Reported headline: EER with its FAR/FRR (changed after the first run, "
+            "D-024); the registered headline, FRR at FAR = 0.01, is reported beside it. "
+            "FAR = 0.001 is flagged under-resolved. See docs/DECISIONS.md D-020 to D-024."
         ),
         "partial_run": partial,
         "enrollable_subjects": list(enrollable),
@@ -455,7 +456,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     headline = summary["splits"][HEADLINE_SPLIT]
     print(
-        f"\nheadline FRR at FAR {HEADLINE_FAR:.0%}: {headline['headline_frr_at_far']['frr']:.3f} "
+        f"\nEER {headline['eer']['protected']:.3f}; FRR at FAR {HEADLINE_FAR:.0%} "
+        f"{headline['headline_frr_at_far']['frr']:.3f} "
         f"(under-resolved: {headline['headline_frr_at_far']['under_resolved']})"
     )
     print(f"artifacts written to {out_dir} in {time.perf_counter() - started:.0f} s")

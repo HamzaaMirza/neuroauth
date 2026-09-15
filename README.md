@@ -4,7 +4,8 @@ Continuous biometric authentication from a live EEG stream. Verifies identity ag
 a claimed subject, revokes the session when the signal stops matching, learns from
 reviewed false rejections, and retrains behind an evaluation gate.
 
-**Status: Phase 1 results in** — signal pipeline and identification baseline. See
+**Status: Phase 2 verification results in** — open-set verification with protected
+templates. Session evaluation and the database are next. See
 [`docs/ROADMAP.md`](docs/ROADMAP.md) for the plan, [`docs/PROGRESS.md`](docs/PROGRESS.md)
 for current state, and [`docs/DECISIONS.md`](docs/DECISIONS.md) for why things are the
 way they are.
@@ -32,8 +33,8 @@ is required and is reproduced here and in the application footer.
 
 eegmmidb is **single-session**. Cross-session drift cannot be demonstrated with this
 dataset, and this project never claims otherwise. Monitoring detects *within-session
-temporal drift* across runs. The same limitation bounds what the Phase 1 results below
-can say about confounds.
+temporal drift* across runs. The same limitation bounds what the results below can say
+about confounds, and about which failures belong to a person rather than to one recording.
 
 ---
 
@@ -135,6 +136,152 @@ model's dependence on temporal-site or high-frequency features as a whole.
 
 ---
 
+## Phase 2 results: open-set verification
+
+The question is now whether a 2 s window is the claimed subject or someone else. Each window
+is scored against that subject's protected template, and impostors include 20 subjects who
+were never trained on or enrolled.
+
+**Setup.**
+
+- **Subjects.** The 89 enrollable subjects are split into five subject-disjoint folds. Each
+  fold's embedding is fitted on the other four, so every genuine user is also unseen by the
+  model that verifies them. The 20 held-out impostors, committed before any result, appear
+  only as impostor probes.
+- **Enrollment and probes.** Enrollment uses eyes-open (R01). Every probe, genuine or
+  impostor, is eyes-closed (R02).
+- **Pipeline.** Relative band power from bounded-context filtering, identical offline and
+  live ([D-020](docs/DECISIONS.md)), a shrinkage-LDA embedding, and 64-bit keyed BioHash
+  templates ([D-023](docs/DECISIONS.md)).
+- **Scope of the numbers.** Scores are per 2 s window. A session integrates many windows,
+  and sessions have not been evaluated yet.
+- **Thresholds.** Every threshold that judges a result was fixed before the run
+  ([D-022](docs/DECISIONS.md)). One reporting change was made afterwards; it is disclosed
+  below ([D-024](docs/DECISIONS.md)).
+
+| Split | EER [95% CI] | FAR / FRR at the EER threshold | FRR at FAR 1% | FRR at FAR 0.1% |
+|---|---|---|---|---|
+| **eyes open → eyes closed (headline)** | **16.5%** [12.3–18.4] | 11.8% / 16.5% | 55.2% | 76.9% *(under-resolved)* |
+| within eyes open, time-blocked | 5.9% [4.6–8.2] | 5.9% / 5.4% | 19.5% | 43.3% *(under-resolved)* |
+
+The headline row pools 4,984 genuine and 99,591 impostor window comparisons over 1,780
+claimed–impostor subject pairs. The intervals come from a bootstrap that resamples subjects,
+never individual windows. FAR 0.1% would need at least 3,000 pairs to resolve, and no split
+of 109 subjects provides that many, so it is reported and flagged rather than interpreted.
+
+**The headline was changed after the results were seen.** The registered headline was FRR at
+FAR 1% (D-022). It was changed to EER once the run showed FRR 55.2% at that operating point.
+The stated reason is that FAR 1% sits far past the EER crossover (threshold 0.6875 against
+0.594), where FRR climbs quickly. That reason was given after the number was known, so both
+numbers stay in the table and the change is recorded as post hoc (D-024). Two facts belong
+next to the EER:
+
+- at the EER threshold, about one impostor window in 8.5 is accepted;
+- at FAR 1%, more than half of genuine windows are rejected.
+
+Both are window-level rates. What a user experiences depends on how a session integrates
+windows, which is not yet evaluated.
+
+![DET curves for the headline split](artifacts/verification/cross_condition_det.png)
+
+### 1. The per-subject tail is a primary result
+
+A pooled EER of 16.5% averages over a very uneven population. Here is each subject's EER,
+computed at that subject's own best threshold:
+
+| | best | p10 | p25 | median | p75 | p90 | worst |
+|---|---|---|---|---|---|---|---|
+| per-subject EER | 0.09% (S090) | 1.8% | 3.6% | **10.7%** | 19.3% | **32.1%** | 71.4% (S108) |
+
+The best decile averages 0.7%. The worst decile (9 subjects) averages **39.5%**, not far
+from the 50% of guessing. Each subject is already at their own optimal threshold, so this is
+a separability failure, not a calibration one: no threshold rescues these subjects. The
+pooled number hides that, across this brain-state change, verification is close to unusable
+for about one user in ten.
+
+This was predicted before the run (P1a: worst-decile mean at least 2× the median and at least
+10 points above it) and is **confirmed**.
+
+![Per-subject EER tail](artifacts/verification/per_subject_tail.png)
+
+### 2. The same people fail identification and verification
+
+- **Registered (P1b).** Spearman ρ = **−0.63** between Phase 1 per-subject F1 and Phase 2
+  per-subject EER, permutation p < 0.001. **Confirmed.** Of the 14 subjects with Phase 1
+  F1 = 0, 10 fall in the worst quartile of EER, where 3.5 would be expected by chance.
+- **Post hoc.** **6 of the 9** worst-decile subjects scored F1 = 0 in Phase 1 (1.4 expected;
+  hypergeometric p = 3×10⁻⁴), and 8 of the 9 scored below 0.1.
+
+A closed-set Random Forest and an open-set LDA embedding with protected templates fail on the
+same people. The failure is not an artifact of one classifier or of the closed-set framing.
+
+**What that agreement cannot show, and what the within-state split does.** Both phases use
+the same recordings, the same features, and the same eyes-open → eyes-closed structure. Their
+agreement therefore cannot tell "this person is hard to verify" apart from "this person's EEG
+changes a lot when they close their eyes." The time-blocked split, which stays within
+eyes-open, can:
+
+- **7 of the 9** worst-decile subjects verify within eyes-open at a per-subject EER below 10%.
+- Only S043 and S068 are in the worst decile of both splits (0.9 expected; p = 0.22).
+- The per-subject rank correlation between the splits is ρ = 0.48.
+
+So the tail is mostly a property of a subject together with the state change, not of the
+subject alone. Most of these people are verifiable, just not across a change their enrollment
+did not cover. That reading is post hoc, and the within-state per-subject EER is coarse
+(13–14 genuine windows each). With one session per subject, none of this separates a person
+from their recording.
+
+### 3. The brain-state change dominates again
+
+EER is 5.9% within eyes-open and 16.5% across the change: **2.8× worse**, with
+non-overlapping intervals. Phase 1 went the same way (macro-F1 0.846 within, 0.378 across).
+This is the same effect under a second model and task framing, not an independent
+replication, because the recordings, features, and split structure are shared. The two ratios
+are on different metrics (an error rate against an F1) and should not be compared as numbers.
+
+### 4. What template protection costs
+
+| Scores | EER, eyes open → closed | EER, within eyes open |
+|---|---|---|
+| Unprotected embedding (in memory only, never stored) | 9.0% | 3.0% |
+| **Protected 64-bit templates (headline)** | **16.5%** | **5.9%** |
+| Decision layer v0 on protected scores ([D-021](docs/DECISIONS.md)) | 14.2% | 5.4% |
+
+Protection costs 7.4 EER points across the state change and 2.9 within it. Both exceed the
+0.02 materiality threshold fixed before the run. Part of that cost is quantization: similarity
+moves in steps of 1/64, so no threshold makes FAR and FRR equal (11.8% against 16.5% at the
+EER threshold). The decision layer recovers 2.3 points by using each template's enrollment
+statistics. It is reported next to the headline, not instead of it.
+
+### 5. Revocation works
+
+Every template was reissued under a new key from the same enrollment windows. Revoked and
+reissued templates agree on 49.2% of bits (49.5% within eyes-open), where chance is 50%. None
+of the 89 revoked templates is accepted by its reissued template at the deployed threshold.
+The criteria were fixed before the run: agreement between 45% and 55%, and at most 3%
+accepted.
+
+### Controls and limits
+
+- **Random-pairing control.** Each subject's genuine scores are replaced by scores against a
+  different enrolled subject. Across all six split and score tables, EER lands between 45.7%
+  and 54.9%; at least 40% was required.
+- **Enrollment and quality.** No failures to enroll. 58 probe windows were flagged by the
+  quality mask; they were scored, not excluded.
+- **Deployed threshold.** Chosen on cohort impostors only. Its realized FAR on the held-out
+  impostors is 0.67% against a 1% target.
+- **Limits.**
+  - Single-session data: nothing here measures robustness across days.
+  - The evaluation's master secret is public, so these numbers measure the protocol, not key
+    secrecy.
+  - The served demo model is fitted on all 89 subjects; only the fold models produced these
+    numbers.
+
+A proposal for per-subject thresholds is under review; it has not been implemented
+([docs/PHASE2_PER_SUBJECT_THRESHOLDS.md](docs/PHASE2_PER_SUBJECT_THRESHOLDS.md)).
+
+---
+
 ## Getting started
 
 ```bash
@@ -143,7 +290,9 @@ pip install -e ".[dev]"
 
 python -m scripts.verify_dataset --subjects 5      # fetch + validate
 pytest                                             # add -m "not slow" without data
-python -m scripts.train_baseline                   # needs a clean, committed tree
+python -m scripts.train_baseline                   # Phase 1; needs a clean, committed tree
+python -m scripts.evaluate_verification            # Phase 2; needs a clean, committed tree
+python -m scripts.report_verification_tail         # per-subject tail, from committed artifacts
 ```
 
 The impostor holdout is already fixed in `config/impostor_holdout.json`;

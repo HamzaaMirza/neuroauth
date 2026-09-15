@@ -44,7 +44,11 @@ FAR_TARGETS: Final = (0.01, 0.001)
 under-resolution flag."""
 
 HEADLINE_FAR: Final = 0.01
-"""The headline operating point is FRR at FAR = 0.01.
+"""The registered headline operating point: FRR at FAR = 0.01.
+
+After the 72a1b1e run, reporting leads with EER instead (D-024, recorded as a post-hoc
+change). This operating point is still computed and reported beside it, and this value is
+unchanged.
 
 FAR = 0.001 is the roadmap's number and is still reported, but at 1780 pairs it is
 under-resolved (MIN_EXPECTED_ERRORS), and a headline must be a number the data can support.

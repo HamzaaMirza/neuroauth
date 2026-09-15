@@ -1,10 +1,27 @@
 # PROGRESS — NeuroAuth
 
 **Current phase:** 2 — Verification + continuous session + template protection
-**Status:** Items 1–3 implemented and tested: open-set verification, cancelable templates, and
-the streaming session runtime and WebSocket endpoint. `update_session` and
-`initial_session_state` are stubs for the author. The full verification run has not been
-made; it needs committed code. Items 4–5 (Docker, database) remain.
+**Status:** Items 1–3 implemented. Verification has run in full from `72a1b1e` (clean tree)
+and is written up in the README with D-024. Its artifacts are not committed yet.
+`update_session` and `initial_session_state` are stubs for the author. A proposal for
+per-subject thresholds is under review. Items 4–5 (Docker, database) remain.
+
+### Phase 2 verification results (`72a1b1e`)
+
+| | Eyes open → closed (headline) | Within eyes open |
+|---|---|---|
+| EER, protected [95% CI] | **16.5%** [12.3–18.4] (FAR 11.8% / FRR 16.5% at threshold) | 5.9% [4.6–8.2] |
+| FRR at FAR 1% (registered headline) | 55.2% | 19.5% |
+| EER, unprotected embedding / decision v0 | 9.0% / 14.2% | 3.0% / 5.4% |
+
+- **Per-subject tail (P1a confirmed).** Median 10.7%, p90 32.1%, worst-decile mean 39.5%.
+- **Same subjects as Phase 1 (P1b confirmed, ρ = −0.63).** 6 of the 9 worst-decile subjects
+  had Phase 1 F1 = 0 (post hoc, p = 3×10⁻⁴).
+- **State change drives the tail (post hoc).** 7 of those 9 verify within eyes-open below
+  10% EER.
+- **Protection cost is material.** 7.4 points across the state change, 2.9 within it.
+- **Revocation works.** 49.2% bit agreement, 0 of 89 revoked templates accepted.
+- **Controls pass.** Pairing-control EER between 45.7% and 54.9%; no failures to enroll.
 **Last updated:** 2026-09-15
 
 ---
@@ -44,25 +61,27 @@ not looked at.
 
 ## Next up (Phase 2)
 
-1. **Commit, then run the evaluation from the clean tree:**
-   `python -m scripts.evaluate_verification`, which writes `artifacts/verification/`. Commit
-   the artifacts separately. Record the P1a and P1b verdicts, the revocation and
-   protection-cost outcomes, and the headline (FRR at FAR = 0.01, flag included) in the
-   README and here.
-2. **Author writes `initial_session_state` and `update_session`** (`session/logic.py`).
+1. **Commit the verification artifacts from `72a1b1e`, then the write-up.** Run
+   `python -m scripts.report_verification_tail` from the clean tree and commit
+   `per_subject_tail.{json,png}`.
+2. **Author decides on per-subject thresholds**
+   (`docs/PHASE2_PER_SUBJECT_THRESHOLDS.md`) before fixing session parameters. The
+   recommendation is one global threshold, with calibration as a decision-layer input if it
+   is pursued.
+3. **Author writes `initial_session_state` and `update_session`** (`session/logic.py`).
    Threshold values may come only from cohort scores and genuine-only replays of enrollable
    subjects. If `quality_ok` gates anything, the D-015 recalibration on the enrollable cohort
    comes first.
-3. **Session evaluation driver**, once `update_session` exists: time-to-detect over holdout
+4. **Session evaluation driver**, once `update_session` exists: time-to-detect over holdout
    swaps, false challenge and revoke rates on genuine-only replays, and the self-splice
    control. Report distributions beside the 3 s / 5 s floors (D-020).
-4. **Docker, `db/`, migrations, `ingest_subjects.py`** (D-019, D-008). Migration 002: a
+5. **Docker, `db/`, migrations, `ingest_subjects.py`** (D-019, D-008). Migration 002: a
    templates table (bits, key_version, transform, representation and embedding versions,
    enrollment statistics; no seed column), and sessions recording
    `representation_version` and `decision_version` (D-021).
-5. **Wire enrollment, the session resolver, and the transition sink to the database.**
+6. **Wire enrollment, the session resolver, and the transition sink to the database.**
    Verify revocation end to end: a revoked key_version is refused at session start.
-6. Minimal React live-session view.
+7. Minimal React live-session view.
 
 ### Phase 2 expectation: the per-subject tail
 

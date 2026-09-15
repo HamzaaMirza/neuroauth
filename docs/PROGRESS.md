@@ -1,8 +1,9 @@
 # PROGRESS — NeuroAuth
 
 **Current phase:** 2 — Verification + continuous session + template protection
-**Status:** Contracts proposed, awaiting author review (`docs/PHASE2_CONTRACTS.md`). Nothing
-implemented. Phase 1 complete and committed (`a1e6596`, pushed).
+**Status:** Contracts reviewed (`docs/PHASE2_CONTRACTS.md`); §1 is approved. Implementation is
+blocked on the template-lifetime decision (§11). Nothing implemented. Phase 1 complete and
+committed (`a1e6596`, pushed).
 **Last updated:** 2026-09-15
 
 ---
@@ -78,9 +79,14 @@ check whether the same subjects sit in both tails.
 
 ## Open questions
 
-- **Filter edge effects on short buffers.** Proposed fix: filter over a bounded 2 s + 2 s
-  raw context, identical offline and live, at a cost of 2 s latency
-  (`docs/PHASE2_CONTRACTS.md` §1). Pending review.
+- **Filter edge effects on short buffers.** Approved 2026-09-15: filter over a bounded
+  2 s + 2 s raw context, identical offline and live, at a cost of 2 s latency. The 5 s
+  swap-detection figure is a floor, not an expected time. Evidence:
+  `scripts/measurements/edge_effects.py`.
+- **Templates across retrains (blocks implementation).** Retraining the embedding invalidates
+  every template, and raw features are never kept. Options A (freeze the representation,
+  retrain a decision layer) and B (concurrent versions, lazy re-enrollment) are in
+  `docs/PHASE2_CONTRACTS.md` §11. Recommendation A. Author decision pending.
 - **Combined EMG ablation (D-018).** Each single ablation leaves the other route open.
   Not run; if it is, fix its materiality threshold first.
 - **Window size.** 2 s; also the time-to-detect floor for an impostor swap (D-005).
@@ -118,7 +124,15 @@ Docker is not installed; needed at the start of Phase 2.
 protocol, metrics), `templates/` (cancelable, enrollment), `session/` (logic stubs for the
 author, runtime, replay), `ContextConfig`/`StreamingConfig`. Review doc
 `docs/PHASE2_CONTRACTS.md`. ruff and mypy --strict clean. No implementation.
-**Next:** Author review. Then implement 1 → 2 → streaming runtime.
+**Review:**
+- §1 approved.
+- Headline moved to FRR at FAR = 0.01; FAR = 0.001 is flagged under-resolved.
+- Cut order confirmed (CIs are cut before the temporal split).
+- Measurement script committed under `scripts/measurements/`.
+- `initial_session_state` stays with the author.
+
+**Next:** Author decides template lifetime across retrains (§11). Then implement
+1 → 2 → streaming runtime.
 **Notes / decisions:** Edge effects measured on S001R01: per-buffer filtfilt skews delta
 (p95 0.058); bounded 2 s + 2 s context is within 1.4e-3 of whole-recording filtering; a
 causal filter moves Phase 1 features (delta p95 0.124), because of group delay rather than

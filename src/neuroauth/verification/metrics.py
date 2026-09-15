@@ -30,14 +30,23 @@ SessionStateName = Literal["active", "challenged", "revoked", "expired", "closed
 # --------------------------------------------------------------- a priori thresholds
 
 FAR_TARGETS: Final = (0.01, 0.001)
-"""Operating points reported as FRR at FAR. 0.001 is the roadmap headline."""
+"""Operating points reported as FRR at FAR. Both are always reported; each carries its own
+under-resolution flag."""
+
+HEADLINE_FAR: Final = 0.01
+"""The headline operating point is FRR at FAR = 0.01.
+
+FAR = 0.001 is the roadmap's number and is still reported, but at 1780 pairs it is
+under-resolved (MIN_EXPECTED_ERRORS), and a headline must be a number the data can support.
+If the headline point is itself under-resolved (fewer than 300 pairs, e.g. after enrollment
+failures), the report says so. It does not move to a different operating point."""
 
 MIN_EXPECTED_ERRORS: Final = 3.0
-"""An operating point is resolvable only if n_impostor_pairs * target_far is at least this
+"""An operating point is under-resolved when n_impostor_pairs * target_far is below this
 (rule of three). Counted in (claimed subject, impostor subject) pairs, not windows, because
-one impostor's windows against one template are not independent. 89 x 20 = 1780 pairs:
-FAR 0.01 is resolvable, FAR 0.001 (1.8 expected errors) is not, and no split of 109
-subjects could make it so, since (109 - n) * n <= 2970 < 3000."""
+one impostor's windows against one template are not independent. With 89 x 20 = 1780 pairs,
+FAR 0.01 expects 17.8 errors and is resolved; FAR 0.001 expects 1.8 and is under-resolved.
+No split of 109 subjects could resolve it, since (109 - n) * n <= 2970 < 3000."""
 
 RANDOM_PAIRING_CONTROL_MIN_EER: Final = 0.40
 """With genuine scores replaced by scores against a different enrolled subject, pooled EER
@@ -180,15 +189,16 @@ class OperatingPoint:
         far: Achieved FAR.
         frr: Achieved FRR.
         target_far: Requested FAR, or None for the EER point.
-        resolvable: n_impostor_pairs * target_far >= MIN_EXPECTED_ERRORS, or None for the
-            EER point.
+        under_resolved: n_impostor_pairs * target_far < MIN_EXPECTED_ERRORS, or None for
+            the EER point. The rates are still reported, and the flag goes with them into
+            every artifact and README table.
     """
 
     threshold: float
     far: float
     frr: float
     target_far: float | None
-    resolvable: bool | None
+    under_resolved: bool | None
 
 
 def equal_error_rate(rates: ErrorRates) -> OperatingPoint:
@@ -214,7 +224,7 @@ def frr_at_far(rates: ErrorRates, target_far: float, *, n_impostor_pairs: int) -
         rates: From error_rates.
         target_far: In (0, 1).
         n_impostor_pairs: Distinct (claimed, impostor subject) pairs behind the impostor
-            scores, for the resolvability flag.
+            scores, for the under_resolved flag.
 
     Raises:
         ValueError: If target_far is outside (0, 1) or n_impostor_pairs is below 1.
@@ -399,7 +409,11 @@ def time_to_detect(
     """Seconds from swap onset to the first decision at or after it that reaches target_state.
 
     Measured at decision time, which includes the window length and the right context
-    margin, because that is the earliest moment the system could act. "Reaches" means
+    margin, because that is the earliest moment the system could act. With the Phase 2
+    replay constants, no decision reflects any post-swap signal before 3 s, and none rests
+    entirely on impostor signal before 5 s. Those are floors set by the signal path, not
+    expected values: session confidence accumulates over several windows, so measured
+    times are longer, and the distribution is what gets reported. "Reaches" means
     states[i] is target_state or a later one in active < challenged < revoked. A transition
     before the swap is not a detection; false_transition_rate counts those.
 
@@ -492,7 +506,9 @@ class VerificationReport:
         domain: "protected" (headline) or "embedding".
         impostor_source: "impostor_holdout" (headline) or "cohort".
         eer: Oracle EER point on this table.
-        frr_at_far: One OperatingPoint per FAR_TARGETS, each with its resolvability flag.
+        headline: FRR at HEADLINE_FAR. The headline number, with its own under_resolved
+            flag.
+        frr_at_far: One OperatingPoint per FAR_TARGETS, each with its under_resolved flag.
         deployed: Rates on this table at the threshold selected on cohort scores for
             FAR = 0.01, or None when this table is the cohort table.
         eer_ci95: Two-way subject bootstrap, or None if not run.
@@ -514,6 +530,7 @@ class VerificationReport:
     domain: ScoreDomain
     impostor_source: ImpostorSource
     eer: OperatingPoint
+    headline: OperatingPoint
     frr_at_far: tuple[OperatingPoint, ...]
     deployed: OperatingPoint | None
     eer_ci95: tuple[float, float] | None

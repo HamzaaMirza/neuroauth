@@ -1,0 +1,233 @@
+{
+  "what_this_is": "Per-subject EER tail of the Phase 2 headline table (cross-condition, protected, held-out impostors). Registered verdicts are echoed; everything else is post hoc and descriptive (D-024). Per-subject EER uses a per-subject threshold, so the tail exists even with each subject's best possible threshold.",
+  "inputs_sha256": {
+    "artifacts/verification/cross_condition_protected_impostor_holdout_per_subject_eer.csv": "8ee1db3584703b9b9a17c434f437e93ac3ad130675a8dd15ffa0742c3193bc01",
+    "artifacts/verification/temporal_protected_impostor_holdout_per_subject_eer.csv": "cd94bd0008d1bf7b35cce24046267d04251040a7375b65d81c9bccd67a7bd749",
+    "artifacts/relative_cross_condition_per_class_f1.csv": "55a3f681aeebfa6866533c82b52ce38493eb6c5220ac5ed2fe0eed894ba883eb",
+    "artifacts/verification/run_summary.json": "7139414a481c3b290090051d598a280f842415c4facd432fe0832da8c9931608"
+  },
+  "verification_run_git_head": "72a1b1e0c2773d9698d04583d992b8924081f2ce",
+  "registered": {
+    "P1a_heavy_tail": {
+      "verdict": "confirmed",
+      "median_per_subject_eer": 0.10714285714285714,
+      "worst_decile_mean_eer": 0.39472956296012596,
+      "worst_decile_subjects": [
+        108,
+        68,
+        27,
+        44,
+        10,
+        4,
+        43,
+        50,
+        93
+      ]
+    },
+    "P1b_concordance": {
+      "spearman_rho": -0.6289453922043503,
+      "p_value": 9.999000099990002e-05,
+      "zero_f1_in_worst_quartile": 10,
+      "expected_in_worst_quartile_by_chance": 3.5,
+      "verdict": "confirmed",
+      "caveat": "Both phases score the same recordings, so a subject with a poor eyes-closed recording can land in both tails without identity features being the reason."
+    }
+  },
+  "post_hoc": {
+    "distribution_cross_condition": {
+      "n_subjects": 89,
+      "mean": 0.13191166292134832,
+      "quantiles": {
+        "min": 0.000894,
+        "p10": 0.017857,
+        "p25": 0.035714,
+        "median": 0.107143,
+        "p75": 0.193029,
+        "p90": 0.3209434,
+        "max": 0.714286
+      },
+      "decile_means_ascending": [
+        0.007344333333333334,
+        0.01925611111111111,
+        0.03483822222222222,
+        0.05717266666666666,
+        0.091715,
+        0.11919477777777779,
+        0.1556198888888889,
+        0.19084866666666664,
+        0.2694547777777778,
+        0.40389225
+      ],
+      "best_subject": {
+        "subject_id": 90,
+        "eer": 0.000894
+      },
+      "worst_subject": {
+        "subject_id": 108,
+        "eer": 0.714286
+      },
+      "pooled_eer": 0.1647271268057785
+    },
+    "distribution_temporal": {
+      "n_subjects": 89,
+      "mean": 0.04803679775280899,
+      "quantiles": {
+        "min": 0.0,
+        "p10": 0.0,
+        "p25": 0.0,
+        "median": 0.021429,
+        "p75": 0.071429,
+        "p90": 0.142857,
+        "max": 0.428571
+      },
+      "decile_means_ascending": [
+        0.0,
+        0.0,
+        0.0007935555555555556,
+        0.004761555555555556,
+        0.015873111111111112,
+        0.028968333333333332,
+        0.05357155555555556,
+        0.07182577777777778,
+        0.10558600000000001,
+        0.217857
+      ],
+      "best_subject": {
+        "subject_id": 2,
+        "eer": 0.0
+      },
+      "worst_subject": {
+        "subject_id": 68,
+        "eer": 0.428571
+      },
+      "genuine_windows_per_subject": [
+        13,
+        14
+      ]
+    },
+    "worst_decile_cross_condition": {
+      "subjects": [
+        {
+          "subject_id": 108,
+          "eer": 0.714286,
+          "phase1_f1": 0.0,
+          "temporal_eer": 0.096429,
+          "temporal_rank_of_89_ascending": 78
+        },
+        {
+          "subject_id": 68,
+          "eer": 0.457551,
+          "phase1_f1": 0.057143,
+          "temporal_eer": 0.428571,
+          "temporal_rank_of_89_ascending": 89
+        },
+        {
+          "subject_id": 27,
+          "eer": 0.390527,
+          "phase1_f1": 0.0,
+          "temporal_eer": 0.003571,
+          "temporal_rank_of_89_ascending": 29
+        },
+        {
+          "subject_id": 44,
+          "eer": 0.350313,
+          "phase1_f1": 0.0,
+          "temporal_eer": 0.017857,
+          "temporal_rank_of_89_ascending": 43
+        },
+        {
+          "subject_id": 10,
+          "eer": 0.344057,
+          "phase1_f1": 0.0,
+          "temporal_eer": 0.025,
+          "temporal_rank_of_89_ascending": 48
+        },
+        {
+          "subject_id": 4,
+          "eer": 0.331546,
+          "phase1_f1": 0.0,
+          "temporal_eer": 0.032143,
+          "temporal_rank_of_89_ascending": 52
+        },
+        {
+          "subject_id": 43,
+          "eer": 0.321429,
+          "phase1_f1": 0.031746,
+          "temporal_eer": 0.285714,
+          "temporal_rank_of_89_ascending": 88
+        },
+        {
+          "subject_id": 50,
+          "eer": 0.321429,
+          "phase1_f1": 0.0,
+          "temporal_eer": 0.014286,
+          "temporal_rank_of_89_ascending": 40
+        },
+        {
+          "subject_id": 93,
+          "eer": 0.321429,
+          "phase1_f1": 0.344828,
+          "temporal_eer": 0.071429,
+          "temporal_rank_of_89_ascending": 70
+        }
+      ],
+      "boundary_note": "The decile boundary falls inside a tie: the last three members share EER 0.3214, and the next subject sits at 0.3208, so edge membership is fragile."
+    },
+    "worst_decile_vs_phase1_zero_f1": {
+      "n_selected": 9,
+      "n_marked_in_population": 14,
+      "overlap": 6,
+      "overlap_subjects": [
+        4,
+        10,
+        27,
+        44,
+        50,
+        108
+      ],
+      "expected_by_chance": 1.4157303370786516,
+      "hypergeometric_p_at_least": 0.0003343604186015234
+    },
+    "worst_decile_phase1_f1_below_0_1": 8,
+    "cross_split": {
+      "spearman_rho_cross_condition_vs_temporal": 0.4820780716056208,
+      "worst_decile_within_state_eer_below_0_1": 7,
+      "worst_deciles_overlap": {
+        "n_selected": 9,
+        "n_marked_in_population": 9,
+        "overlap": 2,
+        "overlap_subjects": [
+          43,
+          68
+        ],
+        "expected_by_chance": 0.9101123595505618,
+        "hypergeometric_p_at_least": 0.22472154619960036
+      },
+      "temporal_worst_decile": [
+        68,
+        43,
+        64,
+        80,
+        52,
+        70,
+        19,
+        30,
+        41
+      ],
+      "eer_ratio_cross_condition_over_temporal": 2.8116438356164384,
+      "caveat": "Temporal per-subject EER rests on 13-14 genuine windows per subject, so it is coarse."
+    },
+    "oracle_bound_for_per_subject_thresholds": {
+      "mean_per_subject_eer": 0.13191166292134832,
+      "counts_per_subject": [
+        [
+          56,
+          1119
+        ]
+      ],
+      "meaning": "Every headline subject has the same genuine and impostor counts, so with each subject at their own EER threshold the pooled FAR and FRR are the means of the per-subject values, both at most the mean per-subject EER. Those thresholds are chosen on the holdout scores, so this bounds what enrollment-calibrated per-subject thresholds could achieve; it is not an estimate of it."
+    }
+  },
+  "git_head": "ff8978e4321600bc1ed8f210f08197ffc54e1e9e",
+  "git_dirty": false
+}

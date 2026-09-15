@@ -639,11 +639,18 @@ whole-recording filtering, 2 s + 2 s allows 1.4e-3, and 3 s + 3 s allows 2.8e-4.
 after stream start, and each later decision arrives 2 s after its window ends. After a
 simulated swap at 30 s:
 
-- no decision reflects *any* post-swap signal before 3 s;
-- no decision rests *entirely* on impostor signal before 5 s.
+| Decision after the swap | What its input holds |
+|---|---|
+| +1 s (31 s) | first post-swap samples, in the right margin only; they reach the window through the filter tail |
+| +3 s (33 s) | first post-swap samples inside the 2 s window (D-005) |
+| +5 s (35 s) | a window entirely after the 0.5 s crossfade; its left margin still holds 1.5 s of pre-swap and crossfade signal |
+| +7 s (37 s) | the first raw context that is entirely impostor signal |
 
-The 5 s is made of 2 s of right margin, the 2 s window (D-005), and 1 s of crossfade plus
-alignment to the hop grid. These are floors set by the signal path, not expected detection
+*(This entry first gave 3 s and 5 s as the floors for "any" and "entirely" impostor signal.
+Those figures counted only the window and ignored the 6 s of raw context each window is
+filtered over. Corrected on 2026-09-15, while building the swap measurements.)*
+
+These are floors set by the signal path, not expected detection
 times. Session confidence accumulates over several windows, so measured time-to-detect is
 longer. It is reported as a distribution beside the floor, never as the floor alone.
 

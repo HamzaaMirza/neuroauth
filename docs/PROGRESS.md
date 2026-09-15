@@ -74,7 +74,7 @@ not looked at.
    comes first.
 4. **Session evaluation driver**, once `update_session` exists: time-to-detect over holdout
    swaps, false challenge and revoke rates on genuine-only replays, and the self-splice
-   control. Report distributions beside the 3 s / 5 s floors (D-020).
+   control. Report distributions beside the signal-path floors (D-020: +1, +3, +5, +7 s).
 5. **Docker, `db/`, migrations, `ingest_subjects.py`** (D-019, D-008). Migration 002: a
    templates table (bits, key_version, transform, representation and embedding versions,
    enrollment statistics; no seed column), and sessions recording
@@ -100,8 +100,8 @@ in both tails. Both are judged by the a priori criteria in D-022 on the headline
 - **Quality-mask recalibration** on the enrollable cohort, before the mask gates session
   decisions (D-015).
 - **Combined EMG ablation (D-018).** Not run; if it is, fix its materiality threshold first.
-- **Window size.** 2 s; with the 2 s right margin, the signal-path floor on detection is 5 s
-  from fully impostor evidence (D-005, D-020).
+- **Window size.** 2 s. With 2 s margins, a decision's whole raw context is impostor signal
+  only 7 s after a swap (D-005, D-020).
 - **Channel subset.** CAR must be part of that experiment's design (D-006).
 - **Test warning:** starlette's TestClient warns that httpx is deprecated in favour of
   httpx2. Harmless today; revisit when pinning versions.

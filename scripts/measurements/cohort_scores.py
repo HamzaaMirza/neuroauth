@@ -26,6 +26,7 @@ from neuroauth.cohorts import DEFAULT_HOLDOUT_PATH, assert_holdout_excluded, loa
 from neuroauth.config import StreamingConfig
 from neuroauth.dsp.io import load_baseline_recordings
 from neuroauth.dsp.streaming import process_recording_bounded
+from neuroauth.verification.decision import DecisionLayer
 from neuroauth.verification.embedding import EmbeddingConfig
 from neuroauth.verification.metrics import (
     ScoreTable,
@@ -41,6 +42,8 @@ from neuroauth.verification.metrics import (
 from neuroauth.verification.protocol import (
     FOLD_SEED,
     N_FOLDS,
+    FoldScores,
+    cross_fit_decision_layers,
     cross_fit_decision_table,
     score_fold,
     subject_folds,
@@ -55,12 +58,16 @@ NOT_CITABLE = "NOT CITABLE: produced by uncommitted code. Commit, then re-run be
 
 @dataclass(frozen=True)
 class CohortScores:
-    """Genuine and cohort-impostor rows only, in two score domains.
+    """Genuine and cohort-impostor rows only, in two score domains, with what produced them.
 
     Attributes:
         git_head: HEAD when the tables were computed.
         dirty: Uncommitted changes outside artifacts/ at the time.
         streaming: Settings the features were built with.
+        holdout: The committed holdout, kept only to assert exclusion.
+        folds: Per fold, its model, templates, and tables (no holdout rows).
+        decision_layers: Fold -> the cross-fitted decision layer that scores that fold.
+        n_bits: Bit count the decision layers use for the z-score floor.
         protected: Hamming similarity of protected templates.
         decision: Decision layer v0 LLR, cross-fitted across folds.
         per_subject_eer: Claimed subject -> EER against cohort impostors.
@@ -71,6 +78,10 @@ class CohortScores:
     git_head: str
     dirty: bool
     streaming: StreamingConfig
+    holdout: frozenset[int]
+    folds: tuple[FoldScores, ...]
+    decision_layers: dict[int, DecisionLayer]
+    n_bits: int
     protected: ScoreTable
     decision: ScoreTable
     per_subject_eer: dict[int, float]
@@ -102,7 +113,7 @@ def compute_cohort_scores(data_dir: Path) -> CohortScores:
     assert_holdout_excluded((m.subject_id for m in matrices if m.subject_id is not None), holdout)
 
     enrolled_at = datetime.now(UTC)
-    fold_scores = [
+    fold_scores = tuple(
         score_fold(
             matrices,
             fold_index=index,
@@ -116,15 +127,16 @@ def compute_cohort_scores(data_dir: Path) -> CohortScores:
             enrolled_at=enrolled_at,
         )
         for index, fold in enumerate(subject_folds(enrollable, N_FOLDS, FOLD_SEED))
-    ]
+    )
     protected = concatenate_tables([f.protected_table for f in fold_scores])
     if protected.source_is_holdout.any():
         raise AssertionError("holdout rows present in a cohort-only table")
+    n_bits = min(f.model.n_components for f in fold_scores)
+    versions = {f.fold_index: f.representation_version for f in fold_scores}
     decision, _ = cross_fit_decision_table(
-        protected,
-        n_bits=min(f.model.n_components for f in fold_scores),
-        representation_versions={f.fold_index: f.representation_version for f in fold_scores},
+        protected, n_bits=n_bits, representation_versions=versions
     )
+    layers = cross_fit_decision_layers(protected, n_bits=n_bits, representation_versions=versions)
 
     per_subject = per_subject_eer(protected, "cohort")
     pooled = eer_value(
@@ -140,6 +152,10 @@ def compute_cohort_scores(data_dir: Path) -> CohortScores:
         git_head=git_head,
         dirty=dirty,
         streaming=streaming,
+        holdout=holdout,
+        folds=fold_scores,
+        decision_layers=layers,
+        n_bits=n_bits,
         protected=protected,
         decision=decision,
         per_subject_eer=per_subject,

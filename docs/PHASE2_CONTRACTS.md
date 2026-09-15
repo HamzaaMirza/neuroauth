@@ -83,6 +83,11 @@ after stream start. After a swap that starts at `SWAP_AT_S = 30`:
 - No decision rests *entirely* on impostor signal before **5 s**. The first window clear of
   the 0.5 s crossfade starts at 31 s, ends at 33 s, and is decided at 35 s.
 
+*Correction (2026-09-15, recorded in D-020): these two floors count only the window. Each
+window is filtered over a 6 s raw context. Post-swap samples therefore first reach a decision
+at +1 s, in the right margin and only through the filter tail. The first decision whose whole
+raw context is impostor signal comes at +7 s.*
+
 Of those 5 s, 2 s is the filter's right margin, 2 s is the window length (D-005), and 1 s
 is the crossfade plus alignment to the 1 s hop grid. **These are floors set by the signal
 path, not expected detection times.** `update_session` accumulates confidence over several
@@ -192,7 +197,7 @@ the model object. `EmbeddingModel` copies out the projection and pooled statisti
   cohort scores and genuine-only replays of E**, never from holdout replays.
 - **Time-to-detect** is measured at decision time (window end + right margin) and is always
   reported next to the false challenge/revoke rate on genuine-only sessions. Revoking
-  everything instantly would score zero. The 3 s and 5 s figures in §1 are floors; the
+  everything instantly would score zero. The §1 figures, as corrected in D-020, are floors; the
   reported number is the measured distribution.
 - **Splice honesty:** swaps are crossfaded over 0.5 s in the raw domain. A **self-splice
   control** (a subject spliced to a later part of their own probe recording) keeps the

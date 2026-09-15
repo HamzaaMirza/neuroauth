@@ -816,8 +816,9 @@ def time_to_detect(
 
     Measured at decision time, which includes the window length and the right context
     margin, because that is the earliest moment the system could act. With the Phase 2
-    replay constants, no decision reflects any post-swap signal before 3 s, and none rests
-    entirely on impostor signal before 5 s. Those are floors set by the signal path, not
+    replay constants, post-swap samples first reach a decision's filter context at +1 s,
+    enter the window at +3 s, fill the window at +5 s, and fill the whole raw context at
+    +7 s (D-020). Those are floors set by the signal path, not
     expected values: session confidence accumulates over several windows, so measured
     times are longer, and the distribution is what gets reported.
 

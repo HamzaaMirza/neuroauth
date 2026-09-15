@@ -49,7 +49,7 @@ from neuroauth.templates.enrollment import (
     revoke_and_reissue,
     subject_ref,
 )
-from neuroauth.verification.decision import decision_llr, fit_decision_layer
+from neuroauth.verification.decision import DecisionLayer, decision_llr, fit_decision_layer
 from neuroauth.verification.embedding import (
     EmbeddingConfig,
     EmbeddingModel,
@@ -519,20 +519,19 @@ def revocation_agreement(
     return float(values.mean()), float(np.mean(values >= threshold))
 
 
-def cross_fit_decision_table(
+def cross_fit_decision_layers(
     protected: ScoreTable,
     *,
     n_bits: int,
     representation_versions: dict[int, str],
-) -> tuple[ScoreTable, tuple[str, ...]]:
-    """Decision-domain scores, cross-fitted: fold k is scored by a layer trained on the others.
+) -> dict[int, DecisionLayer]:
+    """One decision layer per fold, each trained on the other folds' rows.
 
-    Each layer trains on the other folds' genuine and cohort-impostor rows only (holdout rows
-    are excluded before fitting, and fit_decision_layer asserts it), so no row is ever scored
-    by a layer that saw it.
+    Each layer trains on the other folds' genuine and cohort-impostor rows only. Holdout rows
+    are excluded before fitting, and fit_decision_layer asserts it.
 
     Returns:
-        (decision_table, decision_versions), with one version per fold in ascending fold order.
+        Fold -> the layer that scores that fold, in ascending fold order.
 
     Raises:
         ValueError: If the table is not protected-domain or has fewer than two folds.
@@ -542,17 +541,39 @@ def cross_fit_decision_table(
     folds = np.unique(protected.fold).tolist()
     if len(folds) < 2:
         raise ValueError("cross-fitting needs at least two folds")
-    llr = np.full(protected.scores.shape[0], np.nan)
-    versions: list[str] = []
-    for fold in folds:
-        training = select_rows(protected, (protected.fold != fold) & ~protected.source_is_holdout)
-        layer = fit_decision_layer(
-            training,
+    return {
+        fold: fit_decision_layer(
+            select_rows(protected, (protected.fold != fold) & ~protected.source_is_holdout),
             n_bits=n_bits,
             representation_versions=tuple(
                 representation_versions[other] for other in folds if other != fold
             ),
         )
+        for fold in folds
+    }
+
+
+def cross_fit_decision_table(
+    protected: ScoreTable,
+    *,
+    n_bits: int,
+    representation_versions: dict[int, str],
+) -> tuple[ScoreTable, tuple[str, ...]]:
+    """Decision-domain scores, cross-fitted: fold k is scored by a layer trained on the others.
+
+    No row is ever scored by a layer that saw it (cross_fit_decision_layers).
+
+    Returns:
+        (decision_table, decision_versions), with one version per fold in ascending fold order.
+
+    Raises:
+        ValueError: If the table is not protected-domain or has fewer than two folds.
+    """
+    layers = cross_fit_decision_layers(
+        protected, n_bits=n_bits, representation_versions=representation_versions
+    )
+    llr = np.full(protected.scores.shape[0], np.nan)
+    for fold, layer in layers.items():
         target = protected.fold == fold
         llr[target] = decision_llr(
             layer,
@@ -561,5 +582,5 @@ def cross_fit_decision_table(
             protected.template_score_std[target],
             protected.probe_window_ok[target],
         )
-        versions.append(layer.decision_version)
-    return dataclasses.replace(protected, scores=llr, domain="decision"), tuple(versions)
+    versions = tuple(layer.decision_version for layer in layers.values())
+    return dataclasses.replace(protected, scores=llr, domain="decision"), versions

@@ -1,116 +1,109 @@
 # PROGRESS — NeuroAuth
 
 **Current phase:** 2 — Verification + continuous session + template protection
-**Status:** Contracts reviewed (`docs/PHASE2_CONTRACTS.md`); §1 is approved. Implementation is
-blocked on the template-lifetime decision (§11). Nothing implemented. Phase 1 complete and
-committed (`a1e6596`, pushed).
+**Status:** Items 1–3 implemented and tested: open-set verification, cancelable templates, and
+the streaming session runtime and WebSocket endpoint. `update_session` and
+`initial_session_state` are stubs for the author. The full verification run has not been
+made; it needs committed code. Items 4–5 (Docker, database) remain.
 **Last updated:** 2026-09-15
 
 ---
 
 ## Where things stand
 
-**Phase 1 is complete.** Exit criteria met: a window goes in, a subject prediction
-comes out, and macro-F1 with a confusion matrix is committed. Docker Compose and the
-Postgres setup were moved to Phase 2 (D-019).
+**Phase 1 is complete** (results in the README; D-001 to D-019).
 
-### Phase 1 results (89 enrollable subjects, chance 0.011)
+**Phase 2 decisions recorded:**
 
-| Normalization | Split | Macro-F1 | Shuffled control (ceiling 0.034) |
-|---|---|---|---|
-| **relative** | **cross-condition (headline)** | **0.378** | 0.009 |
-| relative | temporal | 0.846 | 0.010 |
-| absolute_log | cross-condition | 0.597 | 0.005 |
-| absolute_log | temporal | 0.956 | 0.015 |
+- **D-020:** bounded-context filtering, identical offline and live.
+- **D-021:** the embedding is frozen, and retraining adjusts a decision layer.
+- **D-022:** the verification protocol, metric definitions, and a priori thresholds.
+- **D-023:** the cancelable transform.
 
-- **Brain-state change is the dominant effect:** 0.846 within condition vs 0.378 across.
-- **Absolute − relative:** +0.219 / +0.110. Upper bound on the session-artifact
-  contribution; anatomy cannot be separated out (D-004).
-- **Leakage demonstration (D-017):** guarded 0.846 vs deliberately leaky 0.906; the
-  shuffled-label control on the leaky split reads chance.
-- **Frontal EOG (D-004b):** does not concentrate; too small to act on.
-- **EMG ablations (D-018):** without gamma 0.263 (drop 0.116), without temporal sites
-  0.300 (drop 0.078). Both material; bounds, not EMG estimates; importance re-routes.
-- **Reproducibility:** baseline artifacts byte-identical across runs from `b3450bf` and
-  `fa98250`.
+`docs/PHASE2_CONTRACTS.md` stays in the repo as the review record.
 
-### What Phase 2 inherits
+### What exists
 
-- **Signal pipeline:** `dsp/` (io, preprocess, windowing, features, pipeline), MNE
-  confined to `io.py` (D-001). `window_stream_chunk` exists for the streaming path.
-- **Impostor holdout:** 20 subjects in `config/impostor_holdout.json`, committed alone
-  before any result (`1f25cd2`). The file is the source of truth (D-008).
-- **Evaluation discipline:** leakage-safe splits with an overlap assertion, the
-  shuffled-label gate, thresholds fixed before the runs they judge (D-016), and a driver
-  that refuses to write artifacts from uncommitted code.
-- **Written but unexercised:** `migrations/001_phase1_core.sql`, `docker-compose.yml`,
-  `Dockerfile`, stubs in `db/` and `scripts/ingest_subjects.py`.
+| Area | Modules | Notes |
+|---|---|---|
+| Streaming features | `dsp/streaming.py` | Chunk-invariant bit for bit; margins refused below the settling time |
+| Verification | `verification/` (embedding, decision, scoring, protocol, metrics) | Folds, cohort assertions, cross-fitted decision layer v0, pairing control |
+| Templates | `templates/` (cancelable, enrollment) | Golden-pinned projection; no stored key or seed; revoke and reissue |
+| Sessions | `session/` (runtime, replay, logic stubs), `api/stream.py` | Frame protocol, gaps, warm-up, splice; the endpoint only moves bytes |
+| Evaluation | `scripts/evaluate_verification.py` | Refuses dirty-tree artifacts; gates before any write |
+| Evidence | `scripts/measurements/edge_effects.py` | Artifact generated from `0a4abb7` |
+
+326 tests pass, including the slow S001R01 checks. ruff and `mypy --strict` are clean.
+FastAPI, uvicorn, and httpx were added to the dependencies.
+
+A partial smoke run of the evaluation driver (15 enrollable subjects, 4 impostors, no
+bootstrap) wrote to a scratch directory and exited cleanly. Its metrics were deliberately
+not looked at.
 
 ---
 
 ## Next up (Phase 2)
 
-Read `docs/ROADMAP.md` Phase 2 first. The carried-over items are listed there.
-
-Reordered on 2026-09-15. The hard problems (verification, template protection) are pure
-NumPy and testable on synthetic data. Docker Desktop may be blocked on this work-managed
-machine, so it goes late, after the real work.
-
-1. Open-set verification: scoring against a claimed identity, including never-trained
-   subjects; EER, FAR, FRR, FRR@FAR=0.001, DET, time-to-detect.
-2. Cancelable transform, enrollment, revoke-and-reissue.
-3. Session logic: streaming runtime, then `update_session` *(author writes)*.
-4. Docker, `db/`, migrations, `ingest_subjects.py` (D-019, D-008).
-5. Wire enrollment to the database.
-
-The contracts for 1–3 and the a priori thresholds are in `docs/PHASE2_CONTRACTS.md`.
-Committing them fixes the thresholds before any result. After review, fold that file into
-DECISIONS.md (D-020 onward) and delete it.
+1. **Commit, then run the evaluation from the clean tree:**
+   `python -m scripts.evaluate_verification`, which writes `artifacts/verification/`. Commit
+   the artifacts separately. Record the P1a and P1b verdicts, the revocation and
+   protection-cost outcomes, and the headline (FRR at FAR = 0.01, flag included) in the
+   README and here.
+2. **Author writes `initial_session_state` and `update_session`** (`session/logic.py`).
+   Threshold values may come only from cohort scores and genuine-only replays of enrollable
+   subjects. If `quality_ok` gates anything, the D-015 recalibration on the enrollable cohort
+   comes first.
+3. **Session evaluation driver**, once `update_session` exists: time-to-detect over holdout
+   swaps, false challenge and revoke rates on genuine-only replays, and the self-splice
+   control. Report distributions beside the 3 s / 5 s floors (D-020).
+4. **Docker, `db/`, migrations, `ingest_subjects.py`** (D-019, D-008). Migration 002: a
+   templates table (bits, key_version, transform, representation and embedding versions,
+   enrollment statistics; no seed column), and sessions recording
+   `representation_version` and `decision_version` (D-021).
+5. **Wire enrollment, the session resolver, and the transition sink to the database.**
+   Verify revocation end to end: a revoked key_version is refused at session start.
+6. Minimal React live-session view.
 
 ### Phase 2 expectation: the per-subject tail
 
 **14 of 89 subjects score F1 = 0 on the Phase 1 headline split** (21 below 0.1), while
-the median is 0.36. Identity features survive the brain-state change for most subjects
-and not at all for some. Expect the per-subject EER distribution to carry a heavy tail.
-Report per-subject EER (distribution and worst decile), not only the pooled number, and
-check whether the same subjects sit in both tails.
+the median is 0.36. The prediction is a heavy per-subject EER tail, with the same subjects
+in both tails. Both are judged by the a priori criteria in D-022 on the headline table only.
 
 ---
 
 ## Open questions
 
-- **Filter edge effects on short buffers.** Approved 2026-09-15: filter over a bounded
-  2 s + 2 s raw context, identical offline and live, at a cost of 2 s latency. The 5 s
-  swap-detection figure is a floor, not an expected time. Evidence:
-  `scripts/measurements/edge_effects.py`.
-- **Templates across retrains (blocks implementation).** Retraining the embedding invalidates
-  every template, and raw features are never kept. Options A (freeze the representation,
-  retrain a decision layer) and B (concurrent versions, lazy re-enrollment) are in
-  `docs/PHASE2_CONTRACTS.md` §11. Recommendation A. Author decision pending.
-- **Combined EMG ablation (D-018).** Each single ablation leaves the other route open.
-  Not run; if it is, fix its materiality threshold first.
-- **Window size.** 2 s; also the time-to-detect floor for an impostor swap (D-005).
-- **How many impostor subjects.** 20; nested, so the count can rise (D-008).
-- **Quality-mask recalibration** on the enrollable cohort, once the mask gates sessions
-  (D-015).
+- **Model hash across machines.** The served embedding is refitted at startup, and LDA float
+  results can differ across BLAS builds, so a template enrolled on the laptop may not verify
+  in the container (refused as a representation mismatch). Options: enroll in the serving
+  environment, or hash quantized arrays. Decide at item 5.
+- **Quality-mask recalibration** on the enrollable cohort, before the mask gates session
+  decisions (D-015).
+- **Combined EMG ablation (D-018).** Not run; if it is, fix its materiality threshold first.
+- **Window size.** 2 s; with the 2 s right margin, the signal-path floor on detection is 5 s
+  from fully impostor evidence (D-005, D-020).
 - **Channel subset.** CAR must be part of that experiment's design (D-006).
+- **Test warning:** starlette's TestClient warns that httpx is deprecated in favour of
+  httpx2. Harmless today; revisit when pinning versions.
 - **Lint:** `scripts/verify_dataset.py` has an en dash in a print string (RUF001).
 
 ---
 
 ## Decisions deferred
 
-- EEGNet vs Random Forest — Phase 6, only if Phases 1–5 are done
-- Container service choice (ECS Fargate vs App Runner) — Phase 4, gated on WebSocket
-  support
-- Threshold values for challenge/revoke — Phase 2, tuned against the DET curve
-- Alembic — Phase 2, when SQLAlchemy models exist (D-009)
+- A CNN embedding against the frozen LDA embedding: Phase 6. Adoption would be a
+  representation migration requiring re-enrollment (D-021).
+- Container service choice (ECS Fargate vs App Runner): Phase 4, gated on WebSocket support.
+- Challenge and revoke threshold values: the author, from cohort scores only.
+- Alembic: when SQLAlchemy models exist (D-009).
 
 ---
 
 ## Blockers
 
-Docker is not installed; needed at the start of Phase 2.
+Docker is not installed and may be blocked on this work-managed machine. It is needed at
+item 4, deliberately after the NumPy work.
 
 ---
 
@@ -119,25 +112,32 @@ Docker is not installed; needed at the start of Phase 2.
 <!-- Append one entry per session. Newest at top. Keep entries short. -->
 
 ### 2026-09-15
-**Phase:** 2 (contracts)
-**Shipped:** Contract stubs: `dsp/streaming.py`, `verification/` (embedding, scoring,
-protocol, metrics), `templates/` (cancelable, enrollment), `session/` (logic stubs for the
-author, runtime, replay), `ContextConfig`/`StreamingConfig`. Review doc
-`docs/PHASE2_CONTRACTS.md`. ruff and mypy --strict clean. No implementation.
-**Review:**
-- §1 approved.
-- Headline moved to FRR at FAR = 0.01; FAR = 0.001 is flagged under-resolved.
-- Cut order confirmed (CIs are cut before the temporal split).
-- Measurement script committed under `scripts/measurements/`.
-- `initial_session_state` stays with the author.
+**Phase:** 2 (contracts, then items 1–3 implemented)
 
-**Next:** Author decides template lifetime across retrains (§11). Then implement
-1 → 2 → streaming runtime.
-**Notes / decisions:** Edge effects measured on S001R01: per-buffer filtfilt skews delta
-(p95 0.058); bounded 2 s + 2 s context is within 1.4e-3 of whole-recording filtering; a
-causal filter moves Phase 1 features (delta p95 0.124), because of group delay rather than
-magnitude. Impostor count stays 20: no holdout size on 109 subjects resolves FAR = 0.001 at
-pair level. P2 (EMG/cross-session) is not testable in Phase 2.
+**Shipped:**
+- Contracts and their review (`docs/PHASE2_CONTRACTS.md`).
+- Edge-effect measurement script and its artifact from committed code.
+- Items 1–3, with tests: streaming features, embedding, decision layer v0, scoring, the
+  protocol, metrics, the cancelable transform, enrollment and revocation, the session
+  runtime, replay and splice, the WebSocket endpoint, and the evaluation driver.
+- D-020 to D-023. Roadmap Phase 3 and Phase 6 reframed around the frozen embedding.
+
+**Review decisions:**
+- Bounded context approved, 2 s latency included.
+- Headline is FRR at FAR = 0.01; FAR = 0.001 is flagged under-resolved.
+- Cut order: CIs are cut before the temporal split.
+- Embedding frozen (Option A). Backward-compatible training rejected because it requires
+  stored features, a direct conflict with hard rule 3.
+- `update_session` and `initial_session_state` stay with the author.
+
+**Next:** Commit; full evaluation from the clean tree; author writes the session logic.
+
+**Notes / decisions:**
+- The runtime reads only `state` and `confidence` from `SessionState`, and records a client
+  stop as a transition to "closed".
+- A session's time counts received samples; the length of a gap is unknown to the server.
+- The evaluation master secret is a fixed public value (D-023).
+- The v0 decision layer is reported beside the protected-domain headline, not instead of it.
 
 ### 2026-09-14
 **Phase:** 1 → complete

@@ -591,3 +591,372 @@ Docker was also not installed on the development machine.
 the `holdout_never_enrolled` constraint. `ingest_subjects.py` must assert that database
 cohorts match the committed `config/impostor_holdout.json` and never re-derive the
 selection (D-008).
+
+---
+
+## Phase 2
+
+### D-020 — Bounded-context filtering: offline and live features are identical by construction
+
+**Decision.** Every Phase 2 window's features are a pure function of one raw slice: the
+window plus 2 s before it and 2 s after it, filtered with the unchanged Phase 1 `preprocess`
+and cropped back to the window (`neuroauth.dsp.streaming`). Offline, the slice is cut from
+the recording. Live, the window is emitted once its right margin has arrived. Embedding
+training, enrollment, evaluation, and live sessions all use this one path. Whole-recording
+filtering (`pipeline.process_recording`) is Phase 1 only.
+
+**The problem.** D-001 put one `preprocess` function on both paths. That removes code skew,
+not buffer skew. `sosfiltfilt` gets zero phase by filtering forward and then backward. An
+interior window of a 61 s recording sits seconds from either end, but the newest window of a
+live stream sits exactly where the backward pass starts. On S001R01, filtering each 2 s
+buffer on its own moved relative delta power by 0.013 (median) and 0.058 (95th percentile)
+compared with whole-recording filtering. That is the same function giving different
+features, and it would have surfaced as an unexplained FRR gap between evaluation and the
+live demo.
+
+**Alternatives.**
+
+- **A warm-up buffer.** Past context removes the left-edge transient. The transient that
+  matters is on the right, the side with no samples yet, and nothing in the past reaches it.
+- **A causal filter with carried state** (`sosfilt` with `zi`). Chunked output equals
+  one-shot output bit for bit, and it adds no latency. It lost because it changes the
+  features: relative delta power moves by 0.033 (median) and 0.124 (p95) against Phase 1's,
+  about a quarter of delta's window-to-window spread (0.145) at the median. Applying the
+  cascade twice, so its magnitude response matches filtfilt's, made it worse (0.041 / 0.156).
+  The cause is therefore group delay, not attenuation, and there is no cheap correction. It
+  would also put a different pipeline under Phase 1's findings and confound the Phase 1 to
+  Phase 2 tail comparison.
+- **Filtering each buffer independently.** This is the trap described above.
+
+**Margins.** The margins follow from a data-free criterion: the notch-plus-bandpass impulse
+response stays below 1e-3 of its peak after 1.58 s (`SETTLING_TOLERANCE`), which rounds up to
+the 1 s hop as 2 s. `check_margins` refuses anything shorter. The criterion was picked after
+the measurements below had been seen, so the whole grid is published and a reader can judge
+the choice. On S001R01, a 1 s margin on either side allows differences up to 1.3e-2 against
+whole-recording filtering, 2 s + 2 s allows 1.4e-3, and 3 s + 3 s allows 2.8e-4.
+
+**Cost: latency, and a floor on time-to-detect.** A session's first decision arrives 6 s
+after stream start, and each later decision arrives 2 s after its window ends. After a
+simulated swap at 30 s:
+
+- no decision reflects *any* post-swap signal before 3 s;
+- no decision rests *entirely* on impostor signal before 5 s.
+
+The 5 s is made of 2 s of right margin, the 2 s window (D-005), and 1 s of crossfade plus
+alignment to the hop grid. These are floors set by the signal path, not expected detection
+times. Session confidence accumulates over several windows, so measured time-to-detect is
+longer. It is reported as a distribution beside the floor, never as the floor alone.
+
+**Evidence.** `scripts/measurements/edge_effects.py` writes
+`artifacts/measurements/edge_effects.json`, generated from committed code (`0a4abb7`, clean
+tree). It measures signal-processing properties of one enrollable recording. It is not a
+result, and no threshold judges it.
+
+**Enforcement.** `tests/test_streaming.py` checks four things:
+
+- a stream fed in random chunk sizes equals offline features bit for bit;
+- bounded-context features stay within 5e-3 of whole-recording filtering;
+- per-buffer filtering fails that same check, a negative control showing the check has teeth;
+- margins shorter than the settling time are refused.
+
+The 5e-3 tolerance judges a unit test, not a result, so D-016 does not govern it. It was
+chosen after the measurement and is disclosed as such.
+
+**Fingerprints.** `PipelineConfig` is unchanged, so Phase 1 fingerprints still reproduce.
+Phase 2 features carry `StreamingConfig.fingerprint()`, which is namespaced so the two can
+never collide.
+
+---
+
+### D-021 — The embedding is frozen; retraining adjusts a decision layer on stable templates
+
+**Decision.** The *representation* is fixed when a template is enrolled, and the correction
+loop never retrains it. The representation is `StreamingConfig`, the LDA embedding, and the
+cancelable transform, versioned together as `representation_version`. Phase 3 instead
+retrains a *decision layer*: a small logistic model from score-level inputs to a calibrated
+log-likelihood ratio, versioned as `decision_version`. Templates never go stale. The
+correction loop (review, training set, retrain, gate, promote) and the gate criteria are
+unchanged; only the component they act on changes.
+
+**The problem.** A template is `sign(R_k · E(x))`, bound to the embedding E that produced
+it. Raw features are never persisted (hard rule 3), so a template cannot be recomputed under
+a retrained E, only re-enrolled from new signal. A loop that retrains E would invalidate every
+template on every promotion. No system forces its users to re-enroll weekly.
+
+**Why retraining the embedding does not pay here.** A new representation pays only if it is
+better. For EEG, "better" means robust across sessions, and single-session eegmmidb cannot
+measure that. Every mechanism that would make a retrained embedding shippable (per-user
+version state, serving several models at once, stateful rollback) would be built to deliver
+an improvement this project cannot demonstrate.
+
+**An architectural tension, not a limitation.** Hard rule 3 and representation learning pull
+in opposite directions. Improving a representation from production evidence requires that
+evidence at feature level, and the rule exists precisely so that feature-level evidence never
+accumulates anywhere. A reviewed false rejection arrives long after its window's features
+were discarded. `record_false_rejection` can hold only scores, quality flags, versions,
+thresholds, and a verdict. This is not a gap to engineer around later: any design that closes
+it does so by storing features in some form, which is what the rule forbids. The project
+resolves the tension in favour of the rule and pays for it with a fixed representation.
+
+**Alternatives.**
+
+- **Retrain the embedding and re-enroll everyone on each promotion.** Correct and simple, but
+  unshippable, because every promotion forces every user to re-enroll.
+- **Keep several template versions and re-enroll lazily on the next successful
+  authentication.**
+  - It still cannot train on production rejections, because of the tension above. "Learns
+    from false rejections" would be true only in the demo, where EDF files on disk let
+    features be re-derived: a loop that could not exist in deployment.
+  - Template poisoning: re-enrollment trusts whoever the session accepted, so a false accept
+    becomes a permanent enrollment under the new version. Preventing that needs a
+    re-enrollment bar far above the accept bar, which slows migration.
+  - Version fan-out: users who authenticate rarely keep old versions alive, so retiring a
+    version needs deadlines and forced re-enrollment for stragglers. Rollback becomes
+    stateful.
+  - The gate would compare populations mid-migration.
+  - Its benefit cannot be measured on single-session data, and it carries a large Phase 2
+    cost.
+- **Backward-compatible representation learning** (Shen et al., "Towards
+  Backward-Compatible Representation Learning", CVPR 2020). A new embedding is trained with a
+  loss that keeps its outputs comparable with the old space, so old templates stay valid
+  without re-enrollment. It is the standard industrial answer to the cost of re-indexing.
+  It is rejected here specifically because **it requires stored features.** The
+  compatibility loss is computed on training inputs, so improving the model from production
+  data means keeping production features. The conflict with hard rule 3 is direct, not
+  incidental. Training only on dataset recordings would sidestep the rule but not the
+  tension. It would also tie every future model to the old space and add a cross-version
+  check to the gate.
+- **Escrow encrypted features for later re-derivation.** Encryption is invertible by design,
+  and hard rule 3 forbids anything invertible from reaching storage.
+
+**What the decision layer can and cannot learn.**
+
+- It *cannot* fix a false rejection caused by the representation itself, such as the
+  brain-state failures behind the Phase 1 per-subject tail. The README says so.
+- It *can* learn calibration, quality handling, and per-template score offsets.
+- Calibration alone is invisible to the gate. A monotone transform of one global score
+  leaves the pooled DET curve, and so the EER, unchanged. A calibration-only retrain could
+  never pass "EER improvement above threshold", so the layer takes inputs beyond the score.
+- Key invariance limits the inputs. Each subject's projection is an independent random
+  rotation, so bit *i* means a different direction for every user. Per-bit weights cannot be
+  shared. Only summaries of bit agreement that ignore bit order can be, which in practice
+  means the Hamming similarity.
+
+**Decision layer v0** (Phase 2, fixed before any result):
+
+- **Inputs, per window:** the Hamming similarity *s*; its z-score against the claimed
+  template's enrollment statistics, `(s − μ) / max(σ, 1/n_bits)`; and `window_ok`.
+- **The statistics:** μ and σ are the mean and standard deviation of each enrollment
+  window's similarity to a leave-one-out template, built without that window. They are two
+  scalars per template, not invertible, and are recorded on `ProtectedTemplate` at
+  enrollment. They cannot be computed later, because the enrollment windows are gone.
+- **Model:** logistic regression (lbfgs, C = 1.0). The training set's log prior odds are
+  subtracted, so the output is a log-likelihood ratio.
+- **Training data:** only genuine and cohort-impostor score rows, never holdout rows, which
+  is asserted. In evaluation the layer is cross-fitted: fold k's scores come from a layer
+  trained on the other folds' rows.
+
+**Headline unchanged.** The Phase 2 headline was registered before this decision and stays:
+FRR at FAR = 0.01 on protected-domain similarity, cross-condition split, holdout impostors.
+The v0 decision layer is reported beside it and becomes the incumbent the Phase 3 gate
+compares candidates against.
+
+**Representation upgrades.** A better representation, such as the Phase 6 CNN compared
+against the LDA embedding, is a deliberate migration that requires re-enrollment, outside the
+correction loop. It is documented, not built. Templates carry `representation_version`, so
+the path stays open without re-architecture.
+
+**Phase 2 changes.**
+
+- `representation_version` and `decision_version` replace the single model version.
+- `ProtectedTemplate` gains the enrollment statistics.
+- `WindowScore` and `WindowObservation` carry the LLR beside the raw similarity. Which of
+  the two `update_session` uses, and so the units of its thresholds, is the author's call.
+- Migration 002 records both versions on sessions.
+
+---
+
+### D-022 — Open-set verification: shared embedding, subject-disjoint folds, thresholds that never see the holdout
+
+**Decision.** A probe window is scored against the claimed identity's template, using a
+shared embedding fitted on other subjects. The embedding is log relative power,
+standardized, shrinkage LDA, and centered (`neuroauth.verification`). The evaluation
+protocol has three parts:
+
+- The 89 enrollable subjects are split into five subject-disjoint folds.
+- The 20 committed holdout subjects serve only as impostor probes.
+- Operating thresholds and the decision layer are fitted only on cohort-impostor scores.
+
+**Why a shared embedding and not per-subject classifiers.** A score has to be a comparison
+inside the keyed space of the cancelable transform (D-023). A one-vs-rest model's fitted
+parameters would amount to an unprotected template, and every new user would need a
+retrain. The LDA-plus-cosine design is the classic from speaker verification. Being
+linear, it reopens D-004's known property: relative bands sum to one per channel. The log
+transform plus shrinkage handles that. `LinearDiscriminantAnalysis.means_` holds every
+training subject's mean feature vector, so the estimator is never kept. `EmbeddingModel`
+copies out the projection and pooled statistics only, and a test pins its fields.
+
+**Who is unseen by what.**
+
+| Cohort | Fitted on | Enrolled | Role |
+|---|---|---|---|
+| Impostor holdout (20) | never | never | probes only; headline FAR, FRR at FAR, time-to-detect |
+| Fold k of the enrollable cohort | not by fold k's model | yes | genuine users, and cohort impostors for each other |
+| The other folds | yes | not in fold k | embedding training |
+
+Genuine users are unseen by the model as well as impostors, which is what deployment looks
+like. `score_fold` asserts disjointness of training, fold, and holdout on every fold.
+
+**Protocol choices.**
+
+- **Headline split: cross-condition.** Enrollment is on eyes-open, probes on eyes-closed,
+  and impostor probes come from eyes-closed too. A genuine and an impostor comparison
+  therefore differ only in identity.
+- **Temporal split: secondary.** Enrollment on the leading 70% of eyes-open, probes after a
+  one-window guard.
+- **Keys.** Every protected comparison uses the *claimed* identity's key. Scoring an
+  impostor under their own key is the "unstolen token" error that drives BioHash EERs
+  toward zero in parts of the literature. A test checks that scores match the claimed key
+  and differ under the impostor's key.
+- **Threshold selection.** Thresholds come from cohort scores and are reported on the
+  holdout as the deployable number, next to the oracle EER. Choosing a threshold on the
+  holdout and then reporting on it would be selection on the test set, so it is asserted
+  against.
+- **Served model versus evaluation.** The served demo model is fitted on all 89 subjects.
+  Evaluation numbers come only from the fold models, and the README says so.
+
+**Metric definitions.**
+
+- **EER** is the smallest achievable max(FAR, FRR), with its threshold. A real threshold
+  achieves it, unlike an interpolated crossing, and it differs from that crossing by at most
+  one step.
+- **FRR at FAR** uses the smallest threshold meeting the target. Tied scores are accepted or
+  rejected together, which matters because Hamming similarity moves in 1/64 steps.
+- **Resolution** is counted in (claimed, impostor-subject) pairs, not windows. The headline
+  is FRR at FAR = 0.01, resolved at 17.8 expected errors. FAR = 0.001 (1.8 expected errors)
+  is reported and flagged under-resolved. If failures to enroll ever push the headline
+  itself below resolution, the report flags it rather than switching operating points.
+- **Per-subject EER** uses a per-subject threshold, so it is optimistic, and it is always
+  shown beside pooled EER.
+- **Confidence intervals** come from a two-way bootstrap over claimed and impostor
+  *subjects*. Windows are never resampled individually.
+- **Time-to-detect** is measured at decision time and always reported beside the false
+  challenge and revoke rate on genuine-only replays.
+- **Failures to enroll** are counted, never dropped.
+
+**Impostor count stays at 20.** Resolving FAR = 0.001 needs at least 3000 pairs. Over 109
+subjects, (109 − n)·n peaks at 2970, so no holdout size resolves it. Raising the count would
+cost enrollable subjects without buying the resolution. D-008 stands.
+
+**Controls.**
+
+- **Random pairing.** Each claimed subject's genuine scores are replaced by its scores
+  against another enrolled subject (a seeded derangement). EER must be at least 0.40, or
+  nothing is written. This catches pairing and metric bugs. It cannot catch leakage into
+  the embedding fit, which the disjointness assertions rule out structurally, the same
+  split D-007 draws.
+- **Self-splice** (sessions). A subject is spliced to a later part of their own probe
+  recording. Its revocation rate may exceed the genuine-only rate by at most 0.10;
+  otherwise the splice artifact is doing the detecting.
+
+**A priori thresholds.** Fixed in `0a4abb7`, before any Phase 2 result, and pinned by
+`test_a_priori_thresholds_are_unchanged` and `test_replay_constants_are_pinned`.
+
+| Constant | Value | Judges |
+|---|---|---|
+| `HEADLINE_FAR`, `FAR_TARGETS` | 0.01; (0.01, 0.001) | Headline and reported operating points |
+| `MIN_EXPECTED_ERRORS` | 3 pairs | Under-resolved flag |
+| `THRESHOLD_SELECTION_FAR` | 0.01, on cohort scores | Deployed threshold |
+| `RANDOM_PAIRING_CONTROL_MIN_EER` | 0.40 | Run writes nothing below it |
+| `PROTECTION_MATERIAL_EER_COST` | 0.02 | "Material cost of protection" |
+| `TAIL_HEAVY_MIN_RATIO`, `_GAP` | 2× and +0.10 over the median | P1a |
+| `CONCORDANCE_*` | ρ ≤ −0.30 with p < 0.05 confirms; ρ > −0.10 refutes | P1b |
+| `REVOCATION_AGREEMENT_BAND`, `_MAX_ACCEPTED_FRACTION` | [0.45, 0.55]; 3% | Revocation works |
+| `SPLICE_CONTROL_MAX_EXCESS` | 0.10 | Whether time-to-detect is reportable |
+| Protocol | 5 folds (seed 20260915); swap 30 s; crossfade 0.5 s; horizon 25 s | — |
+| Model | 64 components and bits; Ledoit-Wolf shrinkage; floor 1e-6; min 20 enrollment windows | Not tuned |
+
+**Predictions carried in from Phase 1.**
+
+- **P1a, heavy per-subject tail.** Judged by the rule above.
+- **P1b, the same subjects in both tails.** Spearman ρ against the committed Phase 1
+  per-subject F1. Both are judged once, on the headline table. The recorded caveat: both
+  phases score the same recordings, so a poor eyes-closed recording can put a subject in
+  both tails for reasons other than identity.
+- **P2, EMG and cross-session (D-018).** Not testable on single-session data, and nothing
+  in Phase 2 is presented as bearing on it.
+
+**Alternatives.**
+
+- **Fitting the embedding on every enrollable subject and evaluating on the same ones.**
+  Genuine scores would be optimistic, because the model learned exactly those subjects'
+  discriminative directions.
+- **Choosing thresholds on the holdout.** That is selection on the test set.
+- **A window-level bootstrap.** It treats 56 windows from one person as 56 people.
+- **Interpolated or ROC-convex-hull EER.** The first reports a rate no threshold attains;
+  the second adds nothing at these sample sizes.
+
+---
+
+### D-023 — Cancelable templates: keyed BioHash, derived keys, no stored seed, no rekey
+
+**Decision.** A template is `sign(R_k · e)`: the mean enrollment embedding, projected by a
+per-subject orthogonal matrix R_k and reduced to its signs. It has as many bits as the
+embedding has dimensions, 64 at the defaults.
+
+- **The key** is `HMAC-SHA256(master_secret, TRANSFORM_VERSION, subject_ref, key_version)`.
+- **R_k** is built from SHAKE-256 output, turned into normals with `scipy.special.ndtri`,
+  then orthonormalized by QR with its diagonal signs fixed.
+- **Stored:** the bits, the versions (`key_version`, `transform_version`,
+  `representation_version`, `embedding_version`, streaming fingerprint), the window counts,
+  and the two enrollment statistics D-021 needs.
+- **Never stored:** a key, a seed, an embedding, or a feature vector.
+
+**What each property rests on.**
+
+- **Non-invertible with respect to features.** The embedding maps 320 dimensions to 64, and
+  `sign` discards magnitude. Even with the key, the feature vector cannot be recovered.
+- **Revocable and unlinkable.** A new `key_version` gives an independent R, so bit
+  agreement between the revoked and reissued templates of one subject sits near chance.
+  This is tested on synthetic data and judged on real data by the D-022 revocation
+  criteria.
+- **Not spoof-resistant when the key and the template both leak.** With R and the bits, an
+  attacker can build an embedding that reproduces them. That is a pre-image, not an
+  inversion, and it survives re-keying because it approximates the person rather than the
+  template. Re-keying defends against a template leak alone. This is a stated limit for
+  THREAT_MODEL.md.
+
+**Why no stored seed.** A seed in the templates table would make a database leak a key leak.
+Deriving keys from a master secret held in `.env` or Secrets Manager means the database
+alone yields bits without R.
+
+**Why not `np.random.Generator`.** NEP 19 does not promise stable distribution streams
+across numpy versions. A silent change to R after an upgrade would make every stored
+template fail to verify, a mass false rejection with no error. This is the same reasoning as
+D-008. `test_projection_is_stable_across_numpy_versions` pins R to 1e-12, and its docstring
+says the fix for a failure is a new transform version plus re-enrollment, never editing the
+golden values.
+
+**Why no `rekey(template)`.** Re-keying stored bits would require inverting the transform;
+if that function could be written, the template would not be cancelable. Reissue
+re-enrolls from fresh features. eegmmidb has one session per subject, so the demo reissues
+from the same recording, and the unlinkability shown comes entirely from the key. That is
+exactly the property under test.
+
+**Evaluation secret.** Evaluation uses a fixed, public value
+(`scripts/evaluate_verification.py`). The evaluation measures the protocol, not key
+secrecy. Open question 5 of the contracts review is resolved this way.
+
+**Alternatives.**
+
+- **Continuous random projection with no quantization.** It preserves distances, but with
+  the key it is exactly invertible back to the embedding.
+- **Fewer bits than dimensions.** It discards more of the embedding for protection that the
+  320 → 64 reduction and `sign` already provide.
+- **More bits than dimensions.** The rows cannot be orthonormal, and it leaks more about the
+  embedding's direction.
+- **A majority vote over per-window bits.** The sign of the mean is steadier than a vote
+  over noisy per-window bits.
+- **Fuzzy commitment, fuzzy vault, or homomorphic matching.** Each needs error-correcting
+  code design for noisy EEG, or cryptographic machinery the scale does not justify (hard
+  rule 7).

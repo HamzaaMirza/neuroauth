@@ -12,6 +12,10 @@ What the rest of the system relies on, and nothing more:
   streaming fingerprint, thresholds, and actor.
 - revoked, expired, and closed are absorbing.
 - The runtime delivers observations in strictly increasing decision_time_s.
+- The runtime reads only `state` and `confidence` from SessionState. On a client stop it
+  records the close itself, by replacing `state` with "closed" (dataclasses.replace), since
+  closing is a lifecycle event rather than a confidence decision. Every other field is the
+  author's.
 
 Where threshold values may come from: cohort-impostor scores and genuine-only replays of
 enrollable subjects. Never impostor-holdout scores or holdout swap replays, which are
@@ -52,6 +56,9 @@ class WindowObservation:
     Attributes:
         decision_time_s: WindowScore.decision_time_s.
         score: Hamming similarity in [0, 1], or None if unscorable.
+        llr: The decision layer's log-likelihood ratio (D-021), or None if unscorable.
+            Whether confidence is built from score or llr, and so the units of the
+            thresholds, is the author's call.
         quality_ok: QualityReport.window_ok.
         gap_before: True if frames were lost since the previous observation and the stream
             buffer was reset.
@@ -59,6 +66,7 @@ class WindowObservation:
 
     decision_time_s: float
     score: float | None
+    llr: float | None
     quality_ok: bool
     gap_before: bool
 

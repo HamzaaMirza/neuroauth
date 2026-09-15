@@ -1,7 +1,7 @@
 """Replayed streams and injected impostors. SIMULATED, and labelled as such everywhere.
 
 eegmmidb has no live headset, so every session is a recording replayed through the real
-WebSocket path (sessions.stream_source = 'replay'). An impostor swap is two recordings
+frame protocol (sessions.stream_source = 'replay'). An impostor swap is two recordings
 spliced together. That splice is the simulated part most likely to flatter the system: a
 hard cut is a step in 64 channels, a broadband transient that could trigger a quality flag or
 an odd spectrum and look like detection. Two defences, both reported: a raised-cosine
@@ -15,6 +15,16 @@ import numpy as np
 from numpy.typing import NDArray
 
 from neuroauth.dsp.types import Recording
+from neuroauth.session.logic import SessionThresholds
+from neuroauth.session.runtime import (
+    FrameError,
+    encode_frame,
+    handle_frame,
+    handle_stop,
+    start_runtime,
+)
+from neuroauth.verification.metrics import SessionStateName, SessionTrace
+from neuroauth.verification.scoring import Verifier
 
 SWAP_AT_S: Final = 30.0
 """Session time at which the crossfade to the impostor begins. Leaves 24 s of scored genuine
@@ -41,7 +51,14 @@ def replay_chunks(
     Raises:
         ValueError: If data is not 2-D or chunk_s is below one sample.
     """
-    raise NotImplementedError("TODO(phase-2): replay framing")
+    x = np.asarray(data, dtype=np.float64)
+    if x.ndim != 2:
+        raise ValueError(f"expected (n_channels, n_samples), got shape {x.shape}")
+    size = round(chunk_s * sfreq)
+    if size < 1:
+        raise ValueError(f"chunk_s {chunk_s} is below one sample at {sfreq} Hz")
+    for start in range(0, x.shape[1], size):
+        yield x[:, start : start + size]
 
 
 def splice(
@@ -72,11 +89,91 @@ def splice(
             swap_at_s.
 
     Returns:
-        (n_channels, n_samples) raw volts, ending when either source runs out.
+        (n_channels, n_samples) raw volts: first's samples before the swap, the crossfade,
+        then second's samples until second runs out.
 
     Raises:
         ValueError: If sfreq or ch_names differ, the swap or offset falls outside a
             recording, or second is first with second_offset_s equal to swap_at_s (a
             no-op splice).
     """
-    raise NotImplementedError("TODO(phase-2): crossfaded raw splice")
+    if first.sfreq != second.sfreq or first.ch_names != second.ch_names:
+        raise ValueError("spliced recordings must share sfreq and channel order")
+    offset_s = swap_at_s if second_offset_s is None else second_offset_s
+    same_recording = (first.subject_id, first.run) == (second.subject_id, second.run)
+    if same_recording and offset_s == swap_at_s:
+        raise ValueError("splicing a recording onto itself at the same offset changes nothing")
+    swap = round(swap_at_s * first.sfreq)
+    fade = round(crossfade_s * first.sfreq)
+    offset = round(offset_s * first.sfreq)
+    if swap < 0 or fade < 0 or swap + fade > first.data.shape[1]:
+        raise ValueError("swap and crossfade fall outside the first recording")
+    if offset < 0 or offset + fade >= second.data.shape[1]:
+        raise ValueError("offset and crossfade fall outside the second recording")
+
+    weight = 0.5 - 0.5 * np.cos(np.pi * (np.arange(fade) + 0.5) / fade) if fade else np.empty(0)
+    blended = (
+        first.data[:, swap : swap + fade] * (1.0 - weight)
+        + second.data[:, offset : offset + fade] * weight
+    )
+    return np.concatenate(
+        (first.data[:, :swap], blended, second.data[:, offset + fade :]), axis=1
+    ).astype(np.float64)
+
+
+def replay_session(
+    data: NDArray[np.float64],
+    *,
+    verifier: Verifier,
+    thresholds: SessionThresholds,
+    claimed_subject: int,
+    ch_names: tuple[str, ...],
+    sfreq: float,
+    swap_at_s: float | None,
+    impostor_subject: int | None,
+    chunk_s: float = REPLAY_CHUNK_S,
+    session_id: str = "replay",
+) -> SessionTrace:
+    """Replay a stream through the real frame protocol and session runtime.
+
+    Every frame is encoded and decoded exactly as over the WebSocket, so offline replays
+    and the live endpoint exercise one path. Stops at the first terminal state.
+
+    Raises:
+        ValueError: If the runtime refuses the start message.
+    """
+    started = start_runtime(
+        session_id,
+        {
+            "type": "start",
+            "claimed_subject": verifier.template.subject_ref,
+            "sfreq": sfreq,
+            "ch_names": list(ch_names),
+            "stream_source": "replay",
+        },
+        verifier,
+        thresholds,
+    )
+    if isinstance(started, FrameError):
+        raise ValueError(f"replay refused at start: {started.code}: {started.detail}")
+    runtime = started
+    times: list[float] = []
+    states: list[SessionStateName] = []
+    for seq, chunk in enumerate(replay_chunks(data, sfreq, chunk_s=chunk_s)):
+        output = handle_frame(runtime, encode_frame(seq, chunk))
+        runtime = output.runtime
+        for message in output.messages:
+            if message.get("type") == "window":
+                times.append(float(message["decision_time_s"]))  # type: ignore[arg-type]
+                states.append(message["state"])  # type: ignore[arg-type]
+        if output.close:
+            break
+    else:
+        handle_stop(runtime)
+    return SessionTrace(
+        claimed_subject=claimed_subject,
+        decision_times_s=np.asarray(times, dtype=np.float64),
+        states=tuple(states),
+        swap_at_s=swap_at_s,
+        impostor_subject=impostor_subject,
+    )

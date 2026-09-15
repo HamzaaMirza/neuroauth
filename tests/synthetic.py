@@ -69,6 +69,28 @@ def recording_data(*, seed: int = 0, duration_s: float = DURATION_S) -> NDArray[
     return data
 
 
+def eeg_like_data(
+    *, seed: int = 0, duration_s: float = DURATION_S, n_channels: int = 8
+) -> NDArray[np.float64]:
+    """(n_channels, n_samples) noise with a 1/f^2 power spectrum plus 10 Hz alpha, volts.
+
+    The steep low-frequency spectrum puts most power in delta, as resting EEG does. That is
+    where filter edge transients live, so this is the signal the edge-effect tests need.
+    """
+    rng = np.random.default_rng(seed)
+    n_samples = round(duration_s * SFREQ)
+    spectrum = np.fft.rfft(rng.normal(size=(n_channels, n_samples)), axis=-1)
+    freqs = np.fft.rfftfreq(n_samples, 1.0 / SFREQ)
+    amplitude = np.zeros_like(freqs)
+    amplitude[1:] = 1.0 / freqs[1:]
+    brown = np.fft.irfft(spectrum * amplitude, n=n_samples, axis=-1)
+    brown *= 20e-6 / brown.std(axis=-1, keepdims=True)
+    t = np.arange(n_samples) / SFREQ
+    phases = rng.uniform(0.0, 2.0 * np.pi, size=(n_channels, 1))
+    data: NDArray[np.float64] = brown + ALPHA_V * np.sin(2.0 * np.pi * ALPHA_HZ * t + phases)
+    return data
+
+
 def noise_windows(
     *, seed: int = 0, n_windows: int = 4, n_channels: int = N_CHANNELS, n_samples: int = 320
 ) -> NDArray[np.float64]:
@@ -86,6 +108,35 @@ def degraded_windows(*, seed: int = 0) -> NDArray[np.float64]:
     windows[:, CLIPPING_CHANNEL, 1::2] = -1e-3
     windows[:, NAN_CHANNEL, 10] = np.nan
     return windows
+
+
+IDENTITY_BANDS = ("delta", "theta", "alpha", "beta", "gamma")
+IDENTITY_FEATURE_NAMES = tuple(
+    f"rel:C{channel:02d}:{band}" for channel in range(8) for band in IDENTITY_BANDS
+)
+_IDENTITY_BASIS = np.random.default_rng(99).normal(size=(6, len(IDENTITY_FEATURE_NAMES)))
+_STATE_SHIFT = np.random.default_rng(98).normal(size=len(IDENTITY_FEATURE_NAMES))
+
+
+def identity_feature_matrix(subject: int, run: int = 1, n_windows: int = 40) -> FeatureMatrix:
+    """Relative band-power features with a learnable identity and a shared eyes-closed shift.
+
+    log10 relative power = a subject-specific pattern in a 6-dimensional identity subspace,
+    plus a shift common to every subject's eyes-closed run, plus window noise. An embedding
+    fitted on some subjects should separate subjects it never saw.
+    """
+    n_features = len(IDENTITY_FEATURE_NAMES)
+    identity = np.random.default_rng(subject).normal(size=6) @ _IDENTITY_BASIS
+    noise = np.random.default_rng(1000 * subject + run).normal(size=(n_windows, n_features))
+    log_values = -1.0 + 0.3 * identity + (0.8 if run == 2 else 0.0) * _STATE_SHIFT + 0.15 * noise
+    return feature_matrix(
+        subject_id=subject,
+        run=run,
+        condition="eyes_open" if run == 1 else "eyes_closed",
+        n_windows=n_windows,
+        feature_names=IDENTITY_FEATURE_NAMES,
+        values=10.0**log_values,
+    )
 
 
 def feature_matrix(

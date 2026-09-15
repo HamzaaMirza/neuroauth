@@ -1,8 +1,9 @@
 # Phase 2 contracts: proposal for review
 
-**Status:** proposal, 2026-09-15. Contracts only: every body is `raise NotImplementedError`.
-After review, the decisions here move into `docs/DECISIONS.md` as D-020 onward and this
-file is deleted.
+**Status:** reviewed, 2026-09-15. §1 is recorded as D-020, and §11 is decided as Option A
+and recorded as D-021. The remaining sections move into `docs/DECISIONS.md` as they are
+implemented. This file stays in the repo as the review record, because
+`artifacts/measurements/edge_effects.json` cites it.
 
 **Review, 2026-09-15:**
 - §1 approved: bounded context, 2 s margins, and the latency cost.
@@ -300,7 +301,7 @@ the edge-effect tests.
 
 ---
 
-## 11. Templates across retrains *(decide before implementation)*
+## 11. Templates across retrains *(decided: Option A, D-021)*
 
 **The problem.** A template is `sign(R_k · E(x))`. Retrain the embedding E, and every
 stored template sits in the old E's space. Raw features are never kept (hard rule 3), so

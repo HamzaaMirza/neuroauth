@@ -13,20 +13,28 @@ D-004's known property: relative band powers sum to one per channel, so the raw 
 linearly dependent. Features are therefore floored and log10-transformed first, and LDA is
 fitted with shrinkage, so the within-class covariance is always invertible.
 
-Phase 2 persists no model. The served model is refitted deterministically at startup and
-identified by a content hash, and templates are bound to that hash. The MLflow registry takes
-over in Phase 3.
+The embedding is part of the frozen representation (D-021): it is fixed when a template is
+enrolled and never retrained by the correction loop. Phase 2 persists no model. The served
+model is refitted deterministically at startup and identified by a content hash, and
+templates are bound to that hash.
 """
 
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import Final, Literal
 
 import numpy as np
 from numpy.typing import NDArray
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 
 from neuroauth.dsp.types import FeatureMatrix
 
 EMBEDDING_ALGORITHM: Final = "log-relative/standardize/shrinkage-lda/center-v1"
+
+_MIN_SCALE: Final = 1e-12
+"""A standardized column with a smaller standard deviation is left unscaled rather than
+divided by almost zero."""
 
 
 @dataclass(frozen=True)
@@ -68,9 +76,9 @@ class EmbeddingModel:
             assert disjointness from the subjects it evaluates.
         config: Hyperparameters used.
         streaming_fingerprint: StreamingConfig.fingerprint() of the training features.
-        model_version: "sha256:" plus 16 hex digits over the arrays, names, subjects,
-            config, algorithm, and fingerprint. Templates record it, and a mismatch
-            refuses verification.
+        embedding_version: "sha256:" plus 16 hex digits over the arrays, names, subjects,
+            config, algorithm, and fingerprint. One component of the representation version
+            templates are bound to (D-021).
     """
 
     feature_names: tuple[str, ...]
@@ -81,7 +89,41 @@ class EmbeddingModel:
     train_subjects: tuple[int, ...]
     config: EmbeddingConfig
     streaming_fingerprint: str
-    model_version: str
+    embedding_version: str
+
+    @property
+    def n_components(self) -> int:
+        return int(self.projection.shape[0])
+
+
+def _log_relative(values: NDArray[np.float64], floor: float) -> NDArray[np.float64]:
+    logged: NDArray[np.float64] = np.log10(np.maximum(np.asarray(values, dtype=np.float64), floor))
+    return logged
+
+
+def _embedding_version(
+    *,
+    feature_names: tuple[str, ...],
+    arrays: tuple[NDArray[np.float64], ...],
+    train_subjects: tuple[int, ...],
+    config: EmbeddingConfig,
+    streaming_fingerprint: str,
+) -> str:
+    header = {
+        "algorithm": EMBEDDING_ALGORITHM,
+        "config": {
+            "relative_floor": config.relative_floor,
+            "n_components": config.n_components,
+            "shrinkage": config.shrinkage,
+        },
+        "feature_names": list(feature_names),
+        "streaming_fingerprint": streaming_fingerprint,
+        "train_subjects": list(train_subjects),
+    }
+    digest = hashlib.sha256(json.dumps(header, sort_keys=True).encode("utf-8"))
+    for array in arrays:
+        digest.update(np.ascontiguousarray(array, dtype="<f8").tobytes())
+    return f"sha256:{digest.hexdigest()[:16]}"
 
 
 def fit_embedding(
@@ -116,9 +158,91 @@ def fit_embedding(
             evaluated_subjects. Raised explicitly so it survives `python -O` (hard rules 1
             and 5).
         ValueError: If fewer than 3 training subjects, feature_names differ across
-            matrices, any name lacks the "rel:" prefix, or a subject_id is None.
+            matrices, any name lacks the "rel:" prefix, a subject_id is None, or the
+            config is invalid.
     """
-    raise NotImplementedError("TODO(phase-2): fit log/standardize/shrinkage-LDA embedding")
+    if not matrices:
+        raise ValueError("no training matrices")
+    if config.n_components < 1 or config.relative_floor <= 0.0:
+        raise ValueError("n_components must be >= 1 and relative_floor positive")
+    names = matrices[0].feature_names
+    labels: list[NDArray[np.int64]] = []
+    for matrix in matrices:
+        if matrix.feature_names != names:
+            raise ValueError("training matrices have different feature_names")
+        if matrix.subject_id is None:
+            raise ValueError("every training matrix needs a subject_id")
+        labels.append(np.full(matrix.values.shape[0], matrix.subject_id, dtype=np.int64))
+    if not all(name.startswith("rel:") for name in names):
+        raise ValueError("the embedding is defined on relative band power ('rel:' columns) only")
+
+    subjects = tuple(
+        sorted({matrix.subject_id for matrix in matrices if matrix.subject_id is not None})
+    )
+    leaked = sorted(set(subjects) & impostor_holdout)
+    if leaked:
+        raise AssertionError(f"impostor-holdout subjects in embedding training data: {leaked}")
+    evaluated = sorted(set(subjects) & evaluated_subjects)
+    if evaluated:
+        raise AssertionError(f"evaluated subjects in embedding training data: {evaluated}")
+    if len(subjects) < 3:
+        raise ValueError(f"need at least 3 training subjects, got {len(subjects)}")
+
+    x = _log_relative(np.concatenate([matrix.values for matrix in matrices]), config.relative_floor)
+    y = np.concatenate(labels)
+    feature_mean = x.mean(axis=0)
+    raw_scale = x.std(axis=0)
+    feature_scale = np.where(raw_scale > _MIN_SCALE, raw_scale, 1.0)
+    standardized = (x - feature_mean) / feature_scale
+
+    n_components = min(config.n_components, len(subjects) - 1, x.shape[1])
+    lda = LinearDiscriminantAnalysis(
+        solver="eigen", shrinkage=config.shrinkage, n_components=n_components
+    )
+    lda.fit(standardized, y)
+    # Copy out the projection only. The estimator, with its per-subject means_, goes out of
+    # scope here and is never returned.
+    projection = np.ascontiguousarray(
+        np.asarray(lda.scalings_, dtype=np.float64)[:, :n_components].T
+    )
+    del lda
+    center = (standardized @ projection.T).mean(axis=0)
+
+    return EmbeddingModel(
+        feature_names=names,
+        feature_mean=feature_mean,
+        feature_scale=feature_scale,
+        projection=projection,
+        embedding_center=center,
+        train_subjects=subjects,
+        config=config,
+        streaming_fingerprint=streaming_fingerprint,
+        embedding_version=_embedding_version(
+            feature_names=names,
+            arrays=(feature_mean, feature_scale, projection, center),
+            train_subjects=subjects,
+            config=config,
+            streaming_fingerprint=streaming_fingerprint,
+        ),
+    )
+
+
+def embed_values(model: EmbeddingModel, values: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Map raw feature rows, in model.feature_names order, to centered embeddings.
+
+    Raises:
+        ValueError: If values is not (n, n_features).
+    """
+    x = np.asarray(values, dtype=np.float64)
+    if x.ndim != 2 or x.shape[1] != model.feature_mean.shape[0]:
+        raise ValueError(
+            f"expected (n, {model.feature_mean.shape[0]}) feature rows, got shape {x.shape}"
+        )
+    standardized = (_log_relative(x, model.config.relative_floor) - model.feature_mean) / (
+        model.feature_scale
+    )
+    embedded: NDArray[np.float64] = standardized @ model.projection.T - model.embedding_center
+    return embedded
 
 
 def embed(model: EmbeddingModel, features: FeatureMatrix) -> NDArray[np.float64]:
@@ -139,4 +263,6 @@ def embed(model: EmbeddingModel, features: FeatureMatrix) -> NDArray[np.float64]
         ValueError: If feature_names differ from the model's. The verifier checks this
             once at session start (load_verifier), so the per-window path never raises.
     """
-    raise NotImplementedError("TODO(phase-2): apply embedding")
+    if features.feature_names != model.feature_names:
+        raise ValueError("feature_names differ from the embedding model's")
+    return embed_values(model, features.values)

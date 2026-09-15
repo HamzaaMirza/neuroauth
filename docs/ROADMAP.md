@@ -41,10 +41,15 @@ This is where it becomes an authentication system rather than a classifier.
       `db/connection.py`, `db/migrate.py`, and `ingest_subjects.py` *(moved from Phase 1, D-019)*
 - [ ] Hold out N subjects entirely as impostors — never enrolled, never trained on
       *(20 already fixed and committed in Phase 1, D-008; confirm the count for a stable FAR)*
-- [ ] Reframe to open-set verification: score against a claimed identity
-- [ ] Metrics: EER, FAR, FRR, FRR@FAR=0.001, DET curve
-- [ ] Cancelable transform (random projection / bio-hashing), per-user seed
-- [ ] `enroll_subject` — protected template only, raw features never persisted
+- [x] Reframe to open-set verification: score against a claimed identity *(code; full run
+      pending, D-022)*
+- [x] Bounded-context filtering shared by offline and live paths (D-020)
+- [x] Metrics: EER, FAR, FRR, FRR@FAR=0.001, DET curve *(headline FRR@FAR=0.01; 0.001 is
+      reported but flagged under-resolved)*
+- [x] Decision layer v0 on score-level inputs, cross-fitted in evaluation (D-021)
+- [x] Cancelable transform: keyed BioHash, per-user key derived from a master secret, no
+      stored seed (D-023)
+- [x] `enroll_subject` — protected template only, raw features never persisted
 - [ ] `revoke_and_reissue` — verify revocation actually works end to end
 - [ ] WebSocket `/stream/{session_id}` — windowed inference over a replayed stream
 - [ ] `update_session` — EMA confidence decay, challenge and revoke thresholds *(author writes)*
@@ -61,14 +66,20 @@ revoke. DET curve and EER committed.
 
 The centerpiece. This is what separates the project from portfolio ML.
 
+The embedding is fixed at enrollment; retraining adjusts the decision layer on stable
+templates (D-021). The correction loop and the gate are unaffected.
+
 - [ ] False-rejection review UI (admin view)
-- [ ] `record_false_rejection` — full provenance: window scores, model_version, thresholds, reviewer
-- [ ] `build_training_set` — with holdout-overlap and impostor-leakage assertions
+- [ ] `record_false_rejection` — full provenance: window scores, representation_version,
+      decision_version, thresholds, reviewer
+- [ ] `build_training_set` — score-level rows for the decision layer, with holdout-overlap and
+      impostor-leakage assertions
 - [ ] MLflow: tracking server, experiment logging, model registry
 - [ ] Backfill existing DEAP experiment runs into MLflow *(metadata only — no DEAP data in repo)*
-- [ ] `evaluate_candidate` — EER/FAR/FRR/latency for candidate vs incumbent
+- [ ] `evaluate_candidate` — EER/FAR/FRR/latency for candidate vs incumbent decision layer, on
+      score tables from the frozen representation
 - [ ] `promotion_gate` — promote/reject with rationale *(author writes)*
-- [ ] Retrain script, runnable manually
+- [ ] Retrain script, runnable manually — retrains the decision layer; the embedding stays fixed
 - [ ] Rollback path: pinned model version in config
 
 **Exit criteria:** review a rejection, run a retrain, and watch the gate **reject** a model that
@@ -115,8 +126,9 @@ logs its gate decision.
 - [ ] `tests/test_replay.py` — mount an actual replay attack, assert it's caught
 - [ ] `docs/THREAT_MODEL.md` — what an attacker gets, what they can't reconstruct, known limits
 - [ ] Rate limiting on enroll and challenge endpoints
-- [ ] EEGNet / 1D CNN vs Random Forest — publish the delta on both EER and latency
-- [ ] If the CNN doesn't clearly win, keep the RF and say so in the README
+- [ ] EEGNet / 1D CNN vs the frozen LDA embedding — publish the delta on both EER and latency
+- [ ] If the CNN doesn't clearly win, keep the LDA embedding and say so in the README. Adopting
+      it would be a representation migration requiring re-enrollment, not a retrain (D-021)
 
 ---
 

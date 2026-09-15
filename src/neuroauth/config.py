@@ -274,4 +274,10 @@ class StreamingConfig:
         Returns:
             The first 16 hex characters of the SHA-256 digest.
         """
-        raise NotImplementedError("TODO(phase-2): namespaced fingerprint over pipeline + context")
+        canonical = {
+            "fingerprint_namespace": "streaming",
+            "fingerprint_version": _FINGERPRINT_VERSION,
+            "config": _canonical(self),
+        }
+        encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]

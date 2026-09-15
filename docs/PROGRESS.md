@@ -1,8 +1,9 @@
 # PROGRESS — NeuroAuth
 
 **Current phase:** 2 — Verification + continuous session + template protection
-**Status:** Not started. Phase 1 complete and committed (`a1e6596`, pushed).
-**Last updated:** 2026-09-14
+**Status:** Contracts proposed, awaiting author review (`docs/PHASE2_CONTRACTS.md`). Nothing
+implemented. Phase 1 complete and committed (`a1e6596`, pushed).
+**Last updated:** 2026-09-15
 
 ---
 
@@ -50,14 +51,20 @@ Postgres setup were moved to Phase 2 (D-019).
 
 Read `docs/ROADMAP.md` Phase 2 first. The carried-over items are listed there.
 
-1. Install Docker; run Compose; implement `db/connection.py` and `db/migrate.py`;
-   apply `001_phase1_core.sql` (D-019).
-2. `ingest_subjects.py` — assert DB cohorts match the committed holdout file; never
-   re-derive (D-008).
-3. Confirm the impostor count against a FAR-stability argument (nested selection means
-   raising it keeps the 20 already committed).
-4. Reframe to open-set verification; EER, FAR, FRR, FRR@FAR=0.001, DET curve.
-5. Fix Phase 2 evaluation thresholds before the runs they judge (D-016 rule).
+Reordered on 2026-09-15. The hard problems (verification, template protection) are pure
+NumPy and testable on synthetic data. Docker Desktop may be blocked on this work-managed
+machine, so it goes late, after the real work.
+
+1. Open-set verification: scoring against a claimed identity, including never-trained
+   subjects; EER, FAR, FRR, FRR@FAR=0.001, DET, time-to-detect.
+2. Cancelable transform, enrollment, revoke-and-reissue.
+3. Session logic: streaming runtime, then `update_session` *(author writes)*.
+4. Docker, `db/`, migrations, `ingest_subjects.py` (D-019, D-008).
+5. Wire enrollment to the database.
+
+The contracts for 1–3 and the a priori thresholds are in `docs/PHASE2_CONTRACTS.md`.
+Committing them fixes the thresholds before any result. After review, fold that file into
+DECISIONS.md (D-020 onward) and delete it.
 
 ### Phase 2 expectation: the per-subject tail
 
@@ -71,10 +78,9 @@ check whether the same subjects sit in both tails.
 
 ## Open questions
 
-- **Filter edge effects on short buffers.** Same preprocessing function on both paths,
-  but `sosfiltfilt` edge transients differ between a 61 s recording and a short live
-  buffer. D-001 removes code skew, not this. Needs a buffering strategy for the
-  WebSocket path.
+- **Filter edge effects on short buffers.** Proposed fix: filter over a bounded 2 s + 2 s
+  raw context, identical offline and live, at a cost of 2 s latency
+  (`docs/PHASE2_CONTRACTS.md` §1). Pending review.
 - **Combined EMG ablation (D-018).** Each single ablation leaves the other route open.
   Not run; if it is, fix its materiality threshold first.
 - **Window size.** 2 s; also the time-to-detect floor for an impostor swap (D-005).
@@ -105,6 +111,19 @@ Docker is not installed; needed at the start of Phase 2.
 ## Session log
 
 <!-- Append one entry per session. Newest at top. Keep entries short. -->
+
+### 2026-09-15
+**Phase:** 2 (contracts)
+**Shipped:** Contract stubs: `dsp/streaming.py`, `verification/` (embedding, scoring,
+protocol, metrics), `templates/` (cancelable, enrollment), `session/` (logic stubs for the
+author, runtime, replay), `ContextConfig`/`StreamingConfig`. Review doc
+`docs/PHASE2_CONTRACTS.md`. ruff and mypy --strict clean. No implementation.
+**Next:** Author review. Then implement 1 → 2 → streaming runtime.
+**Notes / decisions:** Edge effects measured on S001R01: per-buffer filtfilt skews delta
+(p95 0.058); bounded 2 s + 2 s context is within 1.4e-3 of whole-recording filtering; a
+causal filter moves Phase 1 features (delta p95 0.124), because of group delay rather than
+magnitude. Impostor count stays 20: no holdout size on 109 subjects resolves FAR = 0.001 at
+pair level. P2 (EMG/cross-session) is not testable in Phase 2.
 
 ### 2026-09-14
 **Phase:** 1 → complete

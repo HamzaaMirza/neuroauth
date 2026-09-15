@@ -224,3 +224,54 @@ def _canonical(value: object) -> object:
     if isinstance(value, tuple | list):
         return [_canonical(item) for item in value]
     return value
+
+
+@dataclass(frozen=True)
+class ContextConfig:
+    """Raw context filtered around every window, on the training, enrollment, and live paths.
+
+    Each window's features come from filtering the raw slice [start - left_margin_s,
+    start + window_s + right_margin_s) with `preprocess` and cropping back to the window
+    (neuroauth.dsp.streaming). Zero-phase filtering needs samples on both sides of a
+    window. On a live stream the right-hand samples are in the future, so the right
+    margin is also decision latency: it adds directly to time-to-detect.
+
+    Both margins must cover the settling time of the notch-plus-bandpass impulse response,
+    which is 1.58 s to 1e-3 of peak at the defaults, rounded up to the 1 s hop
+    (streaming.check_margins). Measured on S001R01 against whole-recording filtering, 2 s
+    margins keep every relative band power within 1.4e-3. A 1 s margin on either side
+    allows 1.3e-2.
+
+    Attributes:
+        left_margin_s: Raw seconds before the window start.
+        right_margin_s: Raw seconds after the window end.
+    """
+
+    left_margin_s: float = 2.0
+    right_margin_s: float = 2.0
+
+
+@dataclass(frozen=True)
+class StreamingConfig:
+    """Everything that fixes a Phase 2 feature vector: PipelineConfig plus the context margins.
+
+    PipelineConfig is left unchanged, so every Phase 1 fingerprint still reproduces. Phase 2
+    features come from bounded contexts, so they are close to but not identical to Phase 1's
+    whole-recording features. They carry this fingerprint instead, and the two can never be
+    confused for each other.
+    """
+
+    pipeline: PipelineConfig = field(default_factory=PipelineConfig)
+    context: ContextConfig = field(default_factory=ContextConfig)
+
+    def fingerprint(self) -> str:
+        """Stable short hash of the pipeline and context settings.
+
+        Serialized the same canonical way as PipelineConfig.fingerprint, but under a
+        distinct namespace key, so it can never equal a PipelineConfig fingerprint even
+        in principle.
+
+        Returns:
+            The first 16 hex characters of the SHA-256 digest.
+        """
+        raise NotImplementedError("TODO(phase-2): namespaced fingerprint over pipeline + context")

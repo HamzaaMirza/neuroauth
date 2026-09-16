@@ -4,7 +4,9 @@
 **Status:** Items 1–3 implemented; verification results written up (README, D-024). Session
 parameters are pre-registered from cohort data (D-025) and the self-splice control passes, so
 swap timings may be reported as time-to-detect. `update_session` and `initial_session_state`
-are the author's next piece; the types are settled. Items 4–5 (Docker, database) remain.
+are written to the pre-registered parameter set and tested. The session evaluation driver
+(`scripts/evaluate_sessions.py`) is written and its criteria are pre-registered (D-016,
+D-022); it has not been run yet. Items 4–5 (Docker, database) remain.
 
 ### Phase 2 verification results (`72a1b1e`)
 
@@ -46,11 +48,12 @@ are the author's next piece; the types are settled. Items 4–5 (Docker, databas
 | Streaming features | `dsp/streaming.py` | Chunk-invariant bit for bit; margins refused below the settling time |
 | Verification | `verification/` (embedding, decision, scoring, protocol, metrics) | Folds, cohort assertions, cross-fitted decision layer v0, pairing control |
 | Templates | `templates/` (cancelable, enrollment) | Golden-pinned projection; no stored key or seed; revoke and reissue |
-| Sessions | `session/` (runtime, replay, logic stubs), `api/stream.py` | Frame protocol, gaps, warm-up, splice; the endpoint only moves bytes |
+| Sessions | `session/` (runtime, replay, logic), `api/stream.py` | Frame protocol, gaps, warm-up, splice; the state machine at the pre-registered parameters |
 | Evaluation | `scripts/evaluate_verification.py` | Refuses dirty-tree artifacts; gates before any write |
-| Evidence | `scripts/measurements/edge_effects.py` | Artifact generated from `0a4abb7` |
+| Evidence | `scripts/measurements/` | Edge effects, cohort distributions, session dynamics, dwell cost |
+| Session evaluation | `scripts/evaluate_sessions.py` | Written, not yet run; clean-tree and holdout gates |
 
-326 tests pass, including the slow S001R01 checks. ruff and `mypy --strict` are clean.
+369 tests pass, including the slow S001R01 checks. ruff and `mypy --strict` are clean.
 FastAPI, uvicorn, and httpx were added to the dependencies.
 
 A partial smoke run of the evaluation driver (15 enrollable subjects, 4 impostors, no
@@ -67,14 +70,15 @@ not looked at.
 2. ~~Per-subject thresholds~~ **resolved:** one global threshold, at the pre-registered levels
    in D-025. `docs/PHASE2_PER_SUBJECT_THRESHOLDS.md` stays as the record of what they would
    have cost.
-3. **Author writes `initial_session_state` and `update_session`** (`session/logic.py`), to the
-   settled types and the pre-registered parameters (D-025), including the revoke dwell of
-   three consecutive scored, quality-ok sub-threshold decisions (unscorable and flagged
-   decisions are skipped) within an 8 s span; challenge has none. If `quality_ok` gates
-   anything, the D-015 recalibration on the enrollable cohort comes first.
-4. **Session evaluation driver**, once `update_session` exists: time-to-detect over holdout
-   swaps, false challenge and revoke rates on genuine-only replays, and the self-splice
-   control. Report distributions beside the signal-path floors (D-020: +1, +3, +5, +7 s).
+3. ~~`initial_session_state` and `update_session`~~ **done.** Written to the pre-registered
+   parameter set, with the dwell, the skip rule, the span bound, and the gap rule, and
+   covered by `tests/test_session_logic.py`. The quality mask stays at 500 µV for Phase 2:
+   D-015 records that it was calibrated for scoring flagged windows, not for gating identity
+   decisions, and that the skip rule and `max_consecutive_not_ok` inherit that.
+4. **Run the session evaluation driver from a clean tree.** `scripts/evaluate_sessions.py`
+   is written and its criteria are pre-registered (D-016, D-022): time-to-detect over holdout
+   swaps, false challenge and revoke rates on genuine replays, and the self-splice control.
+   Report distributions beside the signal-path floors (D-020: +1, +3, +5, +7 s).
 5. **Docker, `db/`, migrations, `ingest_subjects.py`** (D-019, D-008). Migration 002: a
    templates table (bits, key_version, transform, representation and embedding versions,
    enrollment statistics; no seed column), and sessions recording
@@ -97,16 +101,15 @@ in both tails. Both are judged by the a priori criteria in D-022 on the headline
   results can differ across BLAS builds, so a template enrolled on the laptop may not verify
   in the container (refused as a representation mismatch). Options: enroll in the serving
   environment, or hash quantized arrays. Decide at item 5.
-- **Quality-mask recalibration** on the enrollable cohort, before the mask gates session
-  decisions (D-015).
+- ~~Quality-mask recalibration~~ **resolved for Phase 2** (D-015): 500 µV stays, recorded as
+  calibrated for scoring rather than gating, bounded by the 1.0% of windows flagged.
+  Recalibration moves to Phase 3, where enrollment-time quality data exists.
 - **Combined EMG ablation (D-018).** Not run; if it is, fix its materiality threshold first.
 - **Window size.** 2 s. With 2 s margins, a decision's whole raw context is impostor signal
   only 7 s after a swap (D-005, D-020).
 - **Channel subset.** CAR must be part of that experiment's design (D-006).
 - **Test warning:** starlette's TestClient warns that httpx is deprecated in favour of
   httpx2. Harmless today; revisit when pinning versions.
-- **Lint:** `scripts/verify_dataset.py` has an en dash in a print string (RUF001).
-
 ---
 
 ## Decisions deferred
@@ -129,6 +132,31 @@ item 4, deliberately after the NumPy work.
 ## Session log
 
 <!-- Append one entry per session. Newest at top. Keep entries short. -->
+
+### 2026-09-16
+**Phase:** 2 (session state machine, session evaluation criteria)
+
+**Shipped:**
+- `initial_session_state` and `update_session`, to the pre-registered parameter set: EMA
+  seeded from the first scored window, challenge on one decision, revoke behind a k = 3 dwell
+  bounded at 8 s, flagged decisions skipped, gaps breaking a run. 24 tests, including a
+  randomized check of the transition contract the events table is written from.
+- `scripts/evaluate_sessions.py`: swap detection against holdout impostors, genuine
+  false-revoke, and the self-splice control, every decision through the real `update_session`.
+- D-015 Phase 2 update; D-025 gap rule and calibration scope; D-016 and D-022 session criteria.
+
+**Decisions:**
+- Quality mask stays at 500 µV for Phase 2 (D-015). It gates identity decisions for the first
+  time, so the scope limit is recorded now rather than as a later caveat.
+- Session criteria pre-registered before the driver was written: median time-to-detect ≤ 15 s,
+  ≥ 80% of armed swaps caught within 25 s, ≤ 15% of genuine sessions revoked, non-tail
+  subjects; self-splice ≤ 0.10 carries over. Failure is reported, never retuned.
+- Genuine false-revoke is a re-measurement, not a holdout result: holdout subjects are never
+  enrolled, so they cannot produce a genuine session (D-022).
+- A gap breaks a dwell run. The frame-drop stall it leaves open is recorded as a cost and
+  deferred to Phase 6 with the replay-attack work (D-025).
+
+**Next:** Commit, then run the session evaluation driver from a clean tree.
 
 ### 2026-09-15
 **Phase:** 2 (contracts, then items 1–3 implemented)

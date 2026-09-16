@@ -93,6 +93,9 @@ def test_a_priori_thresholds_are_unchanged() -> None:
     assert metrics.REVOCATION_AGREEMENT_BAND == (0.45, 0.55)
     assert metrics.REVOCATION_MAX_ACCEPTED_FRACTION == 0.03
     assert metrics.SPLICE_CONTROL_MAX_EXCESS == 0.10
+    assert metrics.SESSION_DETECT_MAX_MEDIAN_S == 15.0
+    assert metrics.SESSION_DETECT_MIN_CAUGHT == 0.80
+    assert metrics.SESSION_MAX_GENUINE_REVOKE == 0.15
     assert (metrics.N_BOOTSTRAP, metrics.BOOTSTRAP_SEED) == (2000, 20260916)
     assert (metrics.N_PERMUTATIONS, metrics.PERMUTATION_SEED) == (10000, 20260917)
     assert metrics.PAIRING_CONTROL_SEED == 20260918

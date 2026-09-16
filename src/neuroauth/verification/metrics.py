@@ -100,6 +100,27 @@ often than genuine-only replays by more than this absolute fraction. Otherwise t
 artifact, not identity, is driving detection, and time-to-detect is not reported as a
 result."""
 
+SESSION_DETECT_MAX_MEDIAN_S: Final = 15.0
+SESSION_DETECT_MIN_CAUGHT: Final = 0.80
+"""Swap detection on the holdout session run, over armed swaps, non-tail subjects (D-016,
+fixed 2026-09-16 before the driver was written). Median time-to-detect at or below
+SESSION_DETECT_MAX_MEDIAN_S, and at least SESSION_DETECT_MIN_CAUGHT of armed swaps revoked
+within DETECTION_HORIZON_S. Cohort measured 12 s and 87.8% at k = 3 (D-025), so the margins
+allow for holdout degradation without being a rubber stamp. These two are genuine holdout
+results: the impostor spliced in is a holdout subject, unseen by the embedding, the decision
+layer, and the thresholds."""
+
+SESSION_MAX_GENUINE_REVOKE: Final = 0.15
+"""Genuine sessions revoked over settled decisions, non-tail subjects. Cohort measured 5.0%
+at k = 3 (D-025).
+
+Not a holdout result, and D-022 records why. Holdout subjects are never enrolled (hard
+rule 1), so they cannot produce a genuine session: genuine replays come from the same
+enrollable subjects the parameters were chosen on. This criterion re-measures them through
+the real state machine and frame protocol rather than the simulation in
+scripts/measurements/dwell_cost.py, so a gap is an implementation discrepancy, not evidence
+about generalization."""
+
 N_BOOTSTRAP: Final = 2000
 BOOTSTRAP_SEED: Final = 20260916
 N_PERMUTATIONS: Final = 10000

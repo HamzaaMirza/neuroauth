@@ -439,8 +439,36 @@ windows not-ok.
 
 **Provenance caveat.** The 500 µV figure came from subjects 1–10 before the holdout was
 selected, and subject 3 is in the holdout (D-008). That is acceptable for Phase 1 only
-because the threshold changes no score — nothing is excluded. Phase 2 recalibrates on
-the enrollable cohort only.
+because the threshold changes no score — nothing is excluded.
+
+**Phase 2 update (2026-09-16): the threshold stays at 500 µV, and it now gates.** Recorded
+before the holdout session run, so it is a stated scope limit rather than a post-hoc caveat.
+
+The mask was calibrated for one job — scoring flagged windows, so that every report could
+carry `n_test_not_ok` beside its number — and it is now doing a different one.
+`update_session` reads `quality_ok` in two places: the dwell skip rule, where a flagged
+decision neither advances nor resets the revoke run, and `max_consecutive_not_ok`, where the
+sixth consecutive unusable decision expires the session (D-025). Both inherit a threshold
+that was never calibrated for gating an identity decision.
+
+**The bound.** Flagged decisions are 1.0% of windows on the enrollable cohort, and they are
+scattered rather than bursty, so the affected surface is small — almost no dwell run in the
+cohort measurements is stretched by a skipped decision at all. That bound is what makes
+keeping 500 µV defensible for Phase 2. It is not an argument that the threshold is right.
+
+**The provenance caveat bites harder now.** In Phase 1 the threshold changed no score, so a
+figure derived partly from subject 3 was inert. It now gates identity decisions, so a
+parameter informed by one holdout subject's data sits in the live path. The 1.0% figure
+bounds that exposure too, and it is recorded rather than resolved.
+
+**Why not recalibrate before the holdout run.** Recalibrating would change which windows are
+flagged, which changes the skip rule's behaviour and therefore the dwell cost, escape, and
+detection tables already measured and recorded in D-025 — tables fixed before the run they
+judge. Doing it now would mean either re-running all of them or leaving them describing a
+mask that no longer exists. The better calibration data does not exist yet either:
+per-channel thresholds want enrollment-time quality statistics per user, which arrive with
+the enrollment and review path in Phase 3. Alternative (b) above — median + k·MAD per channel
+— stays the answer when it does.
 
 ---
 
@@ -487,6 +515,23 @@ session result:
 The same rule applies to them: not adjustable after holdout results, and a change needs an
 entry here reporting results under both values. `tests/test_session_parameters.py` pins them,
 and the reasoning is in D-025.
+
+**Session evaluation criteria.** Fixed on 2026-09-16, before the session evaluation driver was
+written and before any holdout session run. All are scoped to non-tail subjects; D-026 records
+the worst decile separately, and ranking "non-tail" on the session results would define the
+excluded group from the results being judged.
+
+| Criterion | Value | Constant | What it decides |
+|---|---|---|---|
+| Median time-to-detect | ≤ 15 s | `SESSION_DETECT_MAX_MEDIAN_S` | Swap detection is timely |
+| Armed swaps caught within the 25 s horizon | ≥ 80% | `SESSION_DETECT_MIN_CAUGHT` | Swap detection is reliable |
+| Genuine sessions revoked, settled decisions | ≤ 15% | `SESSION_MAX_GENUINE_REVOKE` | The system is usable |
+| Self-splice excess at revoke | ≤ 0.10 | `SPLICE_CONTROL_MAX_EXCESS` | Carried over from D-022, unchanged |
+
+`tests/test_metrics.py` pins the three new values. **Failure is a reported result, not a
+trigger to retune:** a criterion that fails is recorded and explained, and no pre-registered
+parameter moves in response. D-022 records which of these are holdout results and which is a
+re-measurement on data the parameters were already chosen from.
 
 ---
 
@@ -884,6 +929,35 @@ cost enrollable subjects without buying the resolution. D-008 stands.
   recording. Its revocation rate may exceed the genuine-only rate by at most 0.10;
   otherwise the splice artifact is doing the detecting.
 
+**Session evaluation criteria.** Fixed on 2026-09-16, before the session evaluation driver
+was written and before any holdout session run (D-016). Non-tail subjects, at the D-025
+parameters, with the cohort measurement beside each:
+
+| Criterion | Registered | Cohort measured (k = 3) |
+|---|---|---|
+| Median time-to-detect on armed swaps | ≤ 15 s | 12 s |
+| Armed swaps caught within `DETECTION_HORIZON_S` | ≥ 80% | 87.8% |
+| Genuine sessions revoked over settled decisions | ≤ 15% | 5.0% |
+| Self-splice excess at the revoke level | ≤ 0.10 | −2.5 points |
+
+Each margin allows for degradation without being a rubber stamp. A criterion that fails is
+recorded and explained; no pre-registered parameter moves in response.
+
+**Which of these are holdout results, and which is not.** Only the swap criteria are. The
+impostor spliced into a swap is a holdout subject, unseen by the embedding, the decision
+layer, and the thresholds. The genuine false-revoke criterion is not: holdout subjects are
+never enrolled (hard rule 1), so they cannot produce a genuine session, and genuine replays
+come from the same enrollable subjects whose cohort replays the parameters were chosen on.
+That criterion re-measures those subjects through the real state machine and frame protocol
+instead of the EMA simulation in `scripts/measurements/dwell_cost.py`. A gap between the two
+is an implementation discrepancy, not holdout degradation, and it is worth registering for
+exactly that reason. It is not evidence of generalization, and the write-up must not present
+it as one.
+
+**Non-tail is defined from cohort scores, never from the session run.** The worst decile is
+ranked on cohort-impostor per-subject EER, as in every measurement behind D-025. This is the
+same rule `scripts/measurements/cohort_scores.py` already follows.
+
 **A priori thresholds.** Fixed in `0a4abb7`, before any Phase 2 result, and pinned by
 `test_a_priori_thresholds_are_unchanged` and `test_replay_constants_are_pinned`.
 
@@ -898,6 +972,8 @@ cost enrollable subjects without buying the resolution. D-008 stands.
 | `CONCORDANCE_*` | ρ ≤ −0.30 with p < 0.05 confirms; ρ > −0.10 refutes | P1b |
 | `REVOCATION_AGREEMENT_BAND`, `_MAX_ACCEPTED_FRACTION` | [0.45, 0.55]; 3% | Revocation works |
 | `SPLICE_CONTROL_MAX_EXCESS` | 0.10 | Whether time-to-detect is reportable |
+| `SESSION_DETECT_MAX_MEDIAN_S`, `_MIN_CAUGHT` | 15 s; 0.80 | Swap detection on the holdout session run |
+| `SESSION_MAX_GENUINE_REVOKE` | 0.15 | Genuine false-revoke, re-measured (not a holdout result) |
 | Protocol | 5 folds (seed 20260915); swap 30 s; crossfade 0.5 s; horizon 25 s | — |
 | Model | 64 components and bits; Ledoit-Wolf shrinkage; floor 1e-6; min 20 enrollment windows | Not tuned |
 
@@ -1205,6 +1281,15 @@ decisions below the level.
   the session terminates through a route that says the signal went bad rather than that the
   person changed. Keeping the identity decision uncontaminated by signal quality is the
   point.
+
+**Both paths inherit D-015's calibration scope.** The 500 µV mask was calibrated for scoring
+flagged windows in Phase 1, not for gating identity decisions, and it is unchanged for
+Phase 2 — recorded in D-015 on 2026-09-16, before the holdout session run. The skip rule and
+`max_consecutive_not_ok` are the first things to read `quality_ok` in a decision path.
+Flagged decisions are 1.0% of windows and are scattered rather than bursty, which bounds the
+affected surface; recalibration belongs in Phase 3, where enrollment-time quality data
+exists. The dwell cost table above was measured under this mask, so recalibrating would
+invalidate it.
 
 **A run is bounded in time as well: `revoke_dwell_max_span_s` = 8 s.** Pre-registered with
 the rest, before the holdout session run. A run expires if more than 8 s separate its first

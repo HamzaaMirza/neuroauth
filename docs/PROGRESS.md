@@ -70,8 +70,8 @@ not looked at.
 3. **Author writes `initial_session_state` and `update_session`** (`session/logic.py`), to the
    settled types and the pre-registered parameters (D-025), including the revoke dwell of
    three consecutive scored, quality-ok sub-threshold decisions (unscorable and flagged
-   decisions are skipped); challenge has none. If `quality_ok` gates anything, the D-015
-   recalibration on the enrollable cohort comes first.
+   decisions are skipped) within an 8 s span; challenge has none. If `quality_ok` gates
+   anything, the D-015 recalibration on the enrollable cohort comes first.
 4. **Session evaluation driver**, once `update_session` exists: time-to-detect over holdout
    swaps, false challenge and revoke rates on genuine-only replays, and the self-splice
    control. Report distributions beside the signal-path floors (D-020: +1, +3, +5, +7 s).

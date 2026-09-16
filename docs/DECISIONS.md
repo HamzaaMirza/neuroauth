@@ -480,6 +480,7 @@ session result:
 | EMA half-life | 4 s | `PRE_REGISTERED_THRESHOLDS.ema_half_life_s` | How fast confidence follows the windows |
 | Revoke below | 0.56 | `.revoke_below` | Terminal revocation |
 | Revoke dwell | 3 decisions | `.revoke_dwell_decisions` | Consecutive scored, quality-ok sub-threshold decisions revocation needs |
+| Revoke dwell span | 8 s | `.revoke_dwell_max_span_s` | How long a dwell run may stretch before it expires |
 | Challenge below | 0.58 | `.challenge_below` | Step-up prompt, no dwell |
 | Recover above | 0.62 | `.recover_above` | A challenged session returns to active |
 
@@ -1154,23 +1155,32 @@ untested, with drowsiness, movement and electrode drift all pushing the rate up 
 session. A dwell is cheap insurance against a long-session false-revoke rate that can only be
 worse than what was measured.
 
-Measured on cohort data at the pre-registered parameters, k = 1 against k = 3:
+Measured on cohort data under the whole parameter set, with flagged decisions skipped and the
+span bound applied (1.0% of windows are flagged):
 
 | Group | Genuine revoked | Self-splice | Swaps caught | Median | p90 | Impostors escaping |
 |---|---|---|---|---|---|---|
-| others (80), k = 1 | 6.2% | 3.8% | 91.2% | 10 s | 23 s | 2.9% |
-| others (80), k = 3 | 5.0% | 0.0% | 87.8% | 12 s | > 25 s | 3.9% |
-| all 89, k = 1 | 14.6% | 13.5% | 91.4% | 9 s | 22 s | 2.8% |
-| all 89, k = 3 | 13.5% | 7.9% | 87.8% | 11 s | > 25 s | 3.9% |
+| others (80), k = 1 | 6.2% | 3.8% | 91.2% | 10 s | 23 s | 3.0% |
+| others (80), k = 3 | 5.0% | 0.0% | 87.8% | 12 s | > 25 s | 4.1% |
+| all 89, k = 1 | 14.6% | 13.5% | 91.4% | 9 s | 22 s | 2.9% |
+| all 89, k = 3 | 13.5% | 7.9% | 87.8% | 12 s | > 25 s | 4.0% |
 | worst decile (9), k = 3 | 88.9% | 77.8% | 88.1% | 7 s | > 25 s | 3.3% |
 
 So the dwell costs about 2 s of median detection, as expected from the swap trajectory being
 continuously below 0.56 from roughly +10 s. The tail cost is larger than the median cost: the
 90th percentile crosses the 25 s horizon, and the share of swaps caught within it falls by
-3.4 points while impostors escaping entirely rises by 1.0. On the measured 51 s window the
+3.4 points while impostors escaping entirely rises by 1.1. On the measured 51 s window the
 dwell buys only 1.2 points of genuine false-revoke, and it removes self-splice revocations
 for the non-tail subjects outright (3.8% to 0.0%). Its purpose is the long-session rate that
 this dataset cannot measure.
+
+**The span bound changes nothing measurable here, which is the expected result.** Every
+figure above is identical with the bound and without it (k = 3, no span, measured as a
+comparison). Flagged decisions are 1.0% of windows and are scattered rather than bursty, so
+almost no dwell run in this data is stretched at all, let alone past 8 s. The bound is not
+tuned against a measured effect; it closes an attack that replayed resting-state recordings
+cannot contain, since nothing here induces bad windows on purpose. Recorded so the absence of
+an effect is not later mistaken for evidence the bound is unnecessary.
 
 **The dwell has a security cost, and it belongs in the text rather than only in the table.**
 Impostor sessions that are never revoked rise from 2.9% to 3.9% for the non-tail subjects,
@@ -1195,6 +1205,18 @@ decisions below the level.
   the session terminates through a route that says the signal went bad rather than that the
   person changed. Keeping the identity decision uncontaminated by signal quality is the
   point.
+
+**A run is bounded in time as well: `revoke_dwell_max_span_s` = 8 s.** Pre-registered with
+the rest, before the holdout session run. A run expires if more than 8 s separate its first
+and last sub-threshold decisions; the counter resets and the decision that overran the bound
+starts a new run.
+
+The skip rule on its own reopened the stall it was meant to close: with flagged decisions
+skipped, an impostor alternating bad windows with sub-threshold ones could stretch a run
+indefinitely, and a run's first decision would stop describing the current signal. Decisions
+are 1 s apart, so an unobstructed run spans 2 s; 8 s leaves room for up to six skipped windows
+inside a run, which tolerates a genuine burst of bad signal, while capping staleness at two
+EMA half-lives.
 
 **The dwell does nothing for the worst decile.** 88.9% of their genuine sessions are revoked
 at k = 1 and at k = 3 alike. Their sub-threshold stretches are sustained rather than isolated

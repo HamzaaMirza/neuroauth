@@ -115,6 +115,14 @@ def pair_matrix(table: ScoreTable) -> Pairs:
     )
 
 
+def pair_quality(table: ScoreTable) -> Mask:
+    """probe_window_ok in the same (pair, window) layout as pair_matrix."""
+    order = np.lexsort((table.probe_onset_s, table.source_subject, table.claimed_subject))
+    n_windows = int(np.unique(table.probe_onset_s).size)
+    quality: Mask = table.probe_window_ok[order].reshape(order.size // n_windows, n_windows)
+    return quality
+
+
 def ema_matrix(values: Array, times: Array, half_life: float | None) -> Array:
     """EMA along axis 1. None returns the raw windows."""
     if half_life is None:
@@ -173,8 +181,9 @@ def score_features(
     return similarity, llr
 
 
-def swap_sequences(scores: CohortScores, data_dir: Path) -> dict[str, Pairs]:
-    """Per unit: (claimed, impostor, decision times, values) for every cohort swap."""
+def swap_sequences(scores: CohortScores, data_dir: Path) -> tuple[dict[str, Pairs], Mask]:
+    """Per unit: (claimed, impostor, decision times, values) for every cohort swap, and the
+    window quality of those same sessions."""
     streaming = scores.streaming
     units = {"score": pair_matrix(scores.protected), "llr": pair_matrix(scores.decision)}
     claimed, source, onsets, _ = units["score"]
@@ -183,6 +192,7 @@ def swap_sequences(scores: CohortScores, data_dir: Path) -> dict[str, Pairs]:
     row_of = {(int(c), int(s)): i for i, (c, s) in enumerate(zip(claimed, source, strict=True))}
     times = onsets + decision_delay(streaming)
     straddling: dict[tuple[int, int], tuple[Array, Array]] = {}
+    straddling_ok: dict[tuple[int, int], Mask] = {}
     before = np.zeros_like(onsets, dtype=np.bool_)
     mixed = np.zeros_like(onsets, dtype=np.bool_)
 
@@ -225,6 +235,7 @@ def swap_sequences(scores: CohortScores, data_dir: Path) -> dict[str, Pairs]:
                 straddling[(subject, impostor)] = score_features(
                     fold, layer, subject, features, projection
                 )
+                straddling_ok[(subject, impostor)] = features.quality.window_ok
                 if checked:
                     continue
                 checked = True
@@ -252,7 +263,15 @@ def swap_sequences(scores: CohortScores, data_dir: Path) -> dict[str, Pairs]:
     for unit in ("score", "llr"):
         sequences = [assemble(unit, int(claimed[i]), int(source[i])) for i in impostor_rows]
         result[unit] = (claimed[impostor_rows], source[impostor_rows], times, np.stack(sequences))
-    return result
+
+    quality = pair_quality(scores.protected)
+    quality_rows = []
+    for i in impostor_rows:
+        subject, impostor = int(claimed[i]), int(source[i])
+        session_ok = np.where(before, quality[row_of[(subject, subject)]], quality[i])
+        session_ok[mixed] = straddling_ok[(subject, impostor)]
+        quality_rows.append(session_ok)
+    return result, np.stack(quality_rows)
 
 
 def print_impostor_distribution(unit: str, group: str, values: Array, times: Array) -> None:
@@ -351,7 +370,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(line)
 
     worst = np.array(sorted(scores.worst_decile), dtype=np.int64)
-    swaps = swap_sequences(scores, args.data_dir)
+    swaps, _ = swap_sequences(scores, args.data_dir)
     delay = decision_delay(scores.streaming)
     for unit, table in (("score", scores.protected), ("llr", scores.decision)):
         claimed, source, onsets, values = pair_matrix(table)

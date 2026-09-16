@@ -49,6 +49,11 @@ Sustained bad signal is not ignored, it is `max_consecutive_not_ok`'s path, so a
 still ends, through a route that says the signal went bad rather than that the person
 changed.
 
+**A run is bounded in time as well as in count** (pre-registered, D-025). Skipping decisions
+lets a run span more than `revoke_dwell_decisions` seconds, so a run whose first and last
+sub-threshold decisions are more than `revoke_dwell_max_span_s` apart expires: the counter
+resets, and the decision that overran the bound starts a new run.
+
 Recovery is an ordinary transition from "challenged" to "active", with the reason naming the
 level crossed. Revocation is the same shape with to_state "revoked"; because terminal states
 absorb, the runtime then stops scoring, sends the transition, and closes the socket, and any
@@ -78,6 +83,8 @@ class SessionThresholds:
         revoke_dwell_decisions: Consecutive decisions below revoke_below needed to revoke.
             1 would revoke on the first. Counts scored, quality-ok decisions only;
             unscorable or flagged ones are skipped (D-025).
+        revoke_dwell_max_span_s: Seconds a dwell run may span from its first sub-threshold
+            decision to its last. Past it the run expires and a new one begins (D-025).
         min_scored_windows: Scored windows required before any transition.
         max_consecutive_not_ok: Consecutive not-ok windows tolerated before the author's
             chosen consequence.
@@ -88,6 +95,7 @@ class SessionThresholds:
     revoke_below: float
     recover_above: float
     revoke_dwell_decisions: int
+    revoke_dwell_max_span_s: float
     min_scored_windows: int
     max_consecutive_not_ok: int
 
@@ -98,12 +106,13 @@ PRE_REGISTERED_THRESHOLDS: Final = SessionThresholds(
     revoke_below=0.56,
     recover_above=0.62,
     revoke_dwell_decisions=3,
+    revoke_dwell_max_span_s=8.0,
     min_scored_windows=4,
     max_consecutive_not_ok=5,
 )
 """Chosen from cohort scores and genuine-only cohort replays, never from the holdout (D-025).
 
-The five pre-registered values are pinned by tests/test_session_parameters.py. min_scored_
+The six pre-registered values are pinned by tests/test_session_parameters.py. min_scored_
 windows is one half-life of decisions at the 1 s hop; it and max_consecutive_not_ok are the
 author's."""
 

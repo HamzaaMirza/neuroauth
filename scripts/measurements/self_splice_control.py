@@ -53,9 +53,11 @@ from scripts.measurements.cohort_scores import (
 )
 from scripts.measurements.swap_dynamics import (
     Array,
+    Mask,
     decision_delay,
     ema_matrix,
     pair_matrix,
+    pair_quality,
     score_features,
     splice_parts,
     swap_sequences,
@@ -70,10 +72,12 @@ post-splice stretch inside the recording."""
 
 def self_splice_sequences(
     scores: CohortScores, data_dir: Path
-) -> tuple[NDArray[np.int64], Array, Array]:
-    """(claimed subjects, decision times, score sequences), one self-splice per enrolled subject."""
+) -> tuple[NDArray[np.int64], Array, Array, Mask]:
+    """(claimed subjects, decision times, score sequences, window quality), one self-splice
+    per enrolled subject."""
     streaming = scores.streaming
     claimed, source, onsets, values = pair_matrix(scores.protected)
+    quality = pair_quality(scores.protected)
     row_of = {(int(c), int(s)): i for i, (c, s) in enumerate(zip(claimed, source, strict=True))}
     times = onsets + decision_delay(streaming)
     shift_s = SWAP_AT_S - SELF_SPLICE_OFFSET_S
@@ -81,6 +85,7 @@ def self_splice_sequences(
 
     subjects: list[int] = []
     sequences: list[Array] = []
+    qualities: list[Mask] = []
     for fold in scores.folds:
         enrolled = sorted(fold.templates)
         recordings = {
@@ -112,12 +117,18 @@ def self_splice_sequences(
             straddling_scores, _ = score_features(fold, layer, subject, features, projection)
 
             genuine = values[row_of[(subject, subject)]]
+            genuine_ok = quality[row_of[(subject, subject)]]
             sequence = genuine.copy()
+            session_ok = genuine_ok.copy()
             sequence[straddling] = straddling_scores
+            session_ok[straddling] = features.quality.window_ok
             for position in np.flatnonzero(after):
-                sequence[position] = genuine[onset_row[round(float(onsets[position] - shift_s), 6)]]
+                source_row = onset_row[round(float(onsets[position] - shift_s), 6)]
+                sequence[position] = genuine[source_row]
+                session_ok[position] = genuine_ok[source_row]
             subjects.append(subject)
             sequences.append(sequence)
+            qualities.append(session_ok)
 
             if checked:
                 continue
@@ -134,7 +145,7 @@ def self_splice_sequences(
                 f"{full_starts.size} windows vs assembled: max |diff| "
                 f"{np.abs(full_scores - sequence).max():.2e}"
             )
-    return np.array(subjects, dtype=np.int64), times, np.stack(sequences)
+    return np.array(subjects, dtype=np.int64), times, np.stack(sequences), np.stack(qualities)
 
 
 def crossing_rate(sequences: Array, times: Array, level: float, half_life: float) -> float:
@@ -159,12 +170,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     thresholds = PRE_REGISTERED_THRESHOLDS
     half_life = thresholds.ema_half_life_s
     worst = np.array(sorted(scores.worst_decile), dtype=np.int64)
-    self_subjects, times, self_sequences = self_splice_sequences(scores, args.data_dir)
+    self_subjects, times, self_sequences, _ = self_splice_sequences(scores, args.data_dir)
     claimed, source, _, values = pair_matrix(scores.protected)
     genuine_rows = claimed == source
     genuine_subjects = claimed[genuine_rows]
     genuine_sequences = values[genuine_rows]
-    swap_claimed, _, _, swap_values = swap_sequences(scores, args.data_dir)["score"]
+    swap_tables, _ = swap_sequences(scores, args.data_dir)
+    swap_claimed, _, _, swap_values = swap_tables["score"]
 
     print(
         f"\nSELF-SPLICE CONTROL at the pre-registered parameters: score, h = {half_life:g} s, "

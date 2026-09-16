@@ -39,8 +39,15 @@ What the rest of the system relies on, and nothing more:
 **Revocation carries a dwell, challenge does not** (D-025). Revoking takes
 `revoke_dwell_decisions` consecutive decisions below `revoke_below`; a single decision below
 `challenge_below` challenges immediately, because a spurious step-up prompt is cheap and a
-dwell would only delay it. What "consecutive" does when a decision has no score, or when a
-gap intervenes, is the author's call.
+dwell would only delay it.
+
+**The dwell counts scored, quality-ok decisions only** (pre-registered, D-025). A decision
+with no score, or one the quality mask flagged, neither advances nor resets the run: it is
+skipped. Resetting on a bad window would let an impostor stall revocation by inducing bad
+signal; counting one as sub-threshold would revoke genuine users for a hardware fault.
+Sustained bad signal is not ignored, it is `max_consecutive_not_ok`'s path, so a session
+still ends, through a route that says the signal went bad rather than that the person
+changed.
 
 Recovery is an ordinary transition from "challenged" to "active", with the reason naming the
 level crossed. Revocation is the same shape with to_state "revoked"; because terminal states
@@ -69,7 +76,8 @@ class SessionThresholds:
             Terminal.
         recover_above: Confidence above which a challenged session returns to active.
         revoke_dwell_decisions: Consecutive decisions below revoke_below needed to revoke.
-            1 would revoke on the first.
+            1 would revoke on the first. Counts scored, quality-ok decisions only;
+            unscorable or flagged ones are skipped (D-025).
         min_scored_windows: Scored windows required before any transition.
         max_consecutive_not_ok: Consecutive not-ok windows tolerated before the author's
             chosen consequence.

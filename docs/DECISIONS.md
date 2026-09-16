@@ -479,7 +479,7 @@ session result:
 | Session unit | protected score, not the LLR | `session/logic.py` | The units every level below is in (D-025) |
 | EMA half-life | 4 s | `PRE_REGISTERED_THRESHOLDS.ema_half_life_s` | How fast confidence follows the windows |
 | Revoke below | 0.56 | `.revoke_below` | Terminal revocation |
-| Revoke dwell | 3 decisions | `.revoke_dwell_decisions` | Consecutive sub-threshold decisions revocation needs |
+| Revoke dwell | 3 decisions | `.revoke_dwell_decisions` | Consecutive scored, quality-ok sub-threshold decisions revocation needs |
 | Challenge below | 0.58 | `.challenge_below` | Step-up prompt, no dwell |
 | Recover above | 0.62 | `.recover_above` | A challenged session returns to active |
 
@@ -1171,6 +1171,36 @@ continuously below 0.56 from roughly +10 s. The tail cost is larger than the med
 dwell buys only 1.2 points of genuine false-revoke, and it removes self-splice revocations
 for the non-tail subjects outright (3.8% to 0.0%). Its purpose is the long-session rate that
 this dataset cannot measure.
+
+**The dwell has a security cost, and it belongs in the text rather than only in the table.**
+Impostor sessions that are never revoked rise from 2.9% to 3.9% for the non-tail subjects,
+and from 2.8% to 3.9% across all 89. Swaps caught inside the horizon fall from 91.2% to
+87.8%, with the 90th percentile pushed past it. Hard rule 4 governs the promotion gate rather
+than session parameters, but its spirit applies here: this is usability bought with security.
+It is bought deliberately, against a long-session false-revoke rate that is unmeasured and
+can only be worse than what 51 s showed, and it is recorded as a cost instead of being folded
+into a single headline. It also caps the dwell: one extra point of escaping impostors is what
+k = 3 costs, and a longer dwell would cost more for insurance that is already bought.
+
+**Unscorable and quality-flagged decisions are skipped by the dwell** (pre-registered with
+the parameters above). A decision with no score, or one the quality mask flagged, neither
+advances nor resets the run, so the dwell counts three consecutive scored, quality-ok
+decisions below the level.
+
+- **Resetting on a bad window would be a denial-of-revocation attack.** An impostor able to
+  induce bad windows, by loosening an electrode or moving, could stall revocation
+  indefinitely.
+- **Counting a bad window as sub-threshold would revoke genuine users for hardware faults.**
+- **Sustained bad signal is still handled**, by `max_consecutive_not_ok` on its own path, so
+  the session terminates through a route that says the signal went bad rather than that the
+  person changed. Keeping the identity decision uncontaminated by signal quality is the
+  point.
+
+**The dwell does nothing for the worst decile.** 88.9% of their genuine sessions are revoked
+at k = 1 and at k = 3 alike. Their sub-threshold stretches are sustained rather than isolated
+dips, which is what near-coinciding genuine and impostor distributions produce (settled
+medians 0.554 and 0.512). k = 3 is a mitigation for the 80, not for the 9; the tail's
+mitigation remains cross-state enrollment (D-026).
 
 **The stationarity check does not reassure, and the direction is the wrong one.** Between the
 first and second halves of the settled 51 s, revoke crossings per minute rise in both groups

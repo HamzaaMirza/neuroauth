@@ -272,7 +272,7 @@ accepted.
   impostors is 0.67% against a 1% target.
 - **Session parameters are pre-registered** from cohort data only, before any holdout
   session result: protected score, 4 s EMA half-life, revoke at 0.56 after three consecutive
-  sub-threshold decisions, challenge at 0.58 on the first, recovery at 0.62
+  scored sub-threshold decisions, challenge at 0.58 on the first, recovery at 0.62
   ([D-025](docs/DECISIONS.md)). The self-splice control passes, so the
   splice artifact is not what a swap detects. Sessions have not yet been evaluated against
   the holdout.

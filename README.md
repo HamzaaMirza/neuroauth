@@ -270,7 +270,16 @@ accepted.
   quality mask; they were scored, not excluded.
 - **Deployed threshold.** Chosen on cohort impostors only. Its realized FAR on the held-out
   impostors is 0.67% against a 1% target.
+- **Session parameters are pre-registered** from cohort data only, before any holdout
+  session result: protected score, 4 s EMA half-life, revoke at 0.56, challenge at 0.58,
+  recovery at 0.62 ([D-025](docs/DECISIONS.md)). The self-splice control passes, so the
+  splice artifact is not what a swap detects. Sessions have not yet been evaluated against
+  the holdout.
 - **Limits.**
+  - Under those parameters the worst decile is effectively unusable: 88.9% of their genuine
+    sessions would be revoked, and their confidence barely moves when someone else takes
+    over ([D-026](docs/DECISIONS.md)). Loosening the levels for nine subjects would raise FAR
+    for all 89, so this is reported rather than tuned away.
   - Single-session data: nothing here measures robustness across days.
   - The evaluation's master secret is public, so these numbers measure the protocol, not key
     secrecy.

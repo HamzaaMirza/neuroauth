@@ -1,10 +1,10 @@
 # PROGRESS — NeuroAuth
 
 **Current phase:** 2 — Verification + continuous session + template protection
-**Status:** Items 1–3 implemented. Verification has run in full from `72a1b1e` (clean tree)
-and is written up in the README with D-024. Its artifacts are not committed yet.
-`update_session` and `initial_session_state` are stubs for the author. A proposal for
-per-subject thresholds is under review. Items 4–5 (Docker, database) remain.
+**Status:** Items 1–3 implemented; verification results written up (README, D-024). Session
+parameters are pre-registered from cohort data (D-025) and the self-splice control passes, so
+swap timings may be reported as time-to-detect. `update_session` and `initial_session_state`
+are the author's next piece; the types are settled. Items 4–5 (Docker, database) remain.
 
 ### Phase 2 verification results (`72a1b1e`)
 
@@ -64,14 +64,14 @@ not looked at.
 1. **Commit the verification artifacts from `72a1b1e`, then the write-up.** Run
    `python -m scripts.report_verification_tail` from the clean tree and commit
    `per_subject_tail.{json,png}`.
-2. **Author decides on per-subject thresholds**
-   (`docs/PHASE2_PER_SUBJECT_THRESHOLDS.md`) before fixing session parameters. The
-   recommendation is one global threshold, with calibration as a decision-layer input if it
-   is pursued.
-3. **Author writes `initial_session_state` and `update_session`** (`session/logic.py`).
-   Threshold values may come only from cohort scores and genuine-only replays of enrollable
-   subjects. If `quality_ok` gates anything, the D-015 recalibration on the enrollable cohort
-   comes first.
+2. ~~Per-subject thresholds~~ **resolved:** one global threshold, at the pre-registered levels
+   in D-025. `docs/PHASE2_PER_SUBJECT_THRESHOLDS.md` stays as the record of what they would
+   have cost.
+3. **Author writes `initial_session_state` and `update_session`** (`session/logic.py`), to the
+   settled types and the pre-registered parameters (D-025). Decide any dwell requirement
+   (revoke only after k consecutive sub-threshold decisions) before the holdout session run,
+   since it changes reported time-to-detect and false-revoke rates. If `quality_ok` gates
+   anything, the D-015 recalibration on the enrollable cohort comes first.
 4. **Session evaluation driver**, once `update_session` exists: time-to-detect over holdout
    swaps, false challenge and revoke rates on genuine-only replays, and the self-splice
    control. Report distributions beside the signal-path floors (D-020: +1, +3, +5, +7 s).

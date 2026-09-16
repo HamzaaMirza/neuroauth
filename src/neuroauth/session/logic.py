@@ -1,15 +1,25 @@
 """Session state machine: confidence decay, challenge and revoke thresholds.
 
-AUTHOR-WRITTEN (CLAUDE.md). Only the types and signatures are scaffolded here. The field
-lists on SessionThresholds and SessionState are a proposed shape; reshape them freely.
+AUTHOR-WRITTEN (CLAUDE.md). Only the types, the signatures, and the pre-registered parameter
+values are settled here. The bodies of `update_session` and `initial_session_state` are the
+author's.
+
+**The unit is the protected score**, WindowObservation.score: Hamming similarity in [0, 1],
+in steps of 1/64. Not the LLR. A global LLR threshold gives the weakest accounts a higher FAR
+than the rest, which hard rule 4 forbids (D-025). The LLR travels beside it for logging and
+for Phase 3, and nothing in the session logic reads it.
+
+**Pre-registered parameters** (D-025, fixed 2026-09-16 from cohort data only, before any
+holdout session result): PRE_REGISTERED_THRESHOLDS below. Under the D-016 rule they are not
+adjustable after holdout results; a change needs a DECISIONS entry reporting both values.
 
 What the rest of the system relies on, and nothing more:
 
 - update_session is pure and never raises, whatever the observation holds (score None,
   quality not ok, a gap).
 - A SessionTransition is returned exactly when the state name changes, and never otherwise.
-  The runtime writes each one to the events table with provenance: model_version,
-  streaming fingerprint, thresholds, and actor.
+  The runtime writes each one to the events table with provenance: representation_version,
+  decision_version, streaming fingerprint, thresholds, and actor.
 - revoked, expired, and closed are absorbing.
 - The runtime delivers observations in strictly increasing decision_time_s.
 - The runtime reads only `state` and `confidence` from SessionState. On a client stop it
@@ -17,24 +27,38 @@ What the rest of the system relies on, and nothing more:
   closing is a lifecycle event rather than a confidence decision. Every other field is the
   author's.
 
-Where threshold values may come from: cohort-impostor scores and genuine-only replays of
-enrollable subjects. Never impostor-holdout scores or holdout swap replays, which are
-reserved for reporting time-to-detect (protocol.py).
+**Which transitions update_session may return** (the runtime owns "closed" only):
+
+| From | To | Meaning |
+|---|---|---|
+| active | challenged | confidence fell below challenge_below: step up, not a lockout |
+| challenged | active | recovery: confidence climbed back to recover_above |
+| active or challenged | revoked | confidence fell below revoke_below. Terminal |
+| active or challenged | expired | the author's timeout, if one is implemented. Terminal |
+
+Recovery is an ordinary transition from "challenged" to "active", with the reason naming the
+level crossed. Revocation is the same shape with to_state "revoked"; because terminal states
+absorb, the runtime then stops scoring, sends the transition, and closes the socket, and any
+later frame is refused with "session_ended".
 """
 
 from dataclasses import dataclass
+from typing import Final
 
 from neuroauth.verification.metrics import SessionStateName
 
 
 @dataclass(frozen=True)
 class SessionThresholds:
-    """Proposed shape. Recorded verbatim in sessions.threshold_config.
+    """Session parameters, recorded verbatim in sessions.threshold_config.
+
+    The first four are pre-registered (D-025) and fixed under the D-016 rule. The last two
+    are the author's and may change without a DECISIONS entry, because they judge no result.
 
     Attributes:
         ema_half_life_s: Decay of the confidence average, in seconds of decision time.
         challenge_below: Confidence below which an active session is challenged.
-        revoke_below: Confidence below which a session is revoked.
+        revoke_below: Confidence below which a session is revoked. Terminal.
         recover_above: Confidence above which a challenged session returns to active.
         min_scored_windows: Scored windows required before any transition.
         max_consecutive_not_ok: Consecutive not-ok windows tolerated before the author's
@@ -49,16 +73,31 @@ class SessionThresholds:
     max_consecutive_not_ok: int
 
 
+PRE_REGISTERED_THRESHOLDS: Final = SessionThresholds(
+    ema_half_life_s=4.0,
+    challenge_below=0.58,
+    revoke_below=0.56,
+    recover_above=0.62,
+    min_scored_windows=4,
+    max_consecutive_not_ok=5,
+)
+"""Chosen from cohort scores and genuine-only cohort replays, never from the holdout (D-025).
+
+The four pre-registered values are pinned by tests/test_session_parameters.py. min_scored_
+windows is one half-life of decisions at the 1 s hop; it and max_consecutive_not_ok are the
+author's."""
+
+
 @dataclass(frozen=True)
 class WindowObservation:
     """What the session logic sees for one window.
 
     Attributes:
         decision_time_s: WindowScore.decision_time_s.
-        score: Hamming similarity in [0, 1], or None if unscorable.
+        score: Hamming similarity in [0, 1], or None if unscorable. This is the unit the
+            thresholds are in.
         llr: The decision layer's log-likelihood ratio (D-021), or None if unscorable.
-            Whether confidence is built from score or llr, and so the units of the
-            thresholds, is the author's call.
+            Carried for logging and Phase 3; the session logic does not read it (D-025).
         quality_ok: QualityReport.window_ok.
         gap_before: True if frames were lost since the previous observation and the stream
             buffer was reset.
@@ -73,14 +112,15 @@ class WindowObservation:
 
 @dataclass(frozen=True)
 class SessionState:
-    """Proposed shape.
+    """The session as the logic sees it. The runtime reads only `state` and `confidence`.
 
     Attributes:
         state: Matches the sessions.state CHECK in migrations/001_phase1_core.sql.
-        confidence: None before the first scored window.
+        confidence: The EMA of the protected score, in the same units as the thresholds.
+            None before the first scored window, which is what min_scored_windows gates on.
         n_scored_windows: Windows with a score so far.
         consecutive_not_ok: Current run of not-ok windows.
-        last_decision_time_s: None before the first observation.
+        last_decision_time_s: None before the first observation. The EMA uses the gap to it.
     """
 
     state: SessionStateName
@@ -99,7 +139,7 @@ class SessionTransition:
         to_state: After.
         decision_time_s: Of the observation that caused it.
         confidence: After the update.
-        reason: Human-readable, e.g. "confidence 0.41 below revoke threshold 0.45".
+        reason: Human-readable, e.g. "confidence 0.541 below revoke threshold 0.56".
     """
 
     from_state: SessionStateName
@@ -125,7 +165,8 @@ def update_session(
 ) -> tuple[SessionState, SessionTransition | None]:
     """Fold one window observation into the session.
 
-    Author's. See the module docstring for the guarantees the runtime relies on.
+    Author's. See the module docstring for the guarantees the runtime relies on and for the
+    transitions this may return.
 
     Returns:
         (new_state, transition), with transition None unless state.state changed.

@@ -470,6 +470,22 @@ The split parameters and seeds in `scripts/train_baseline.py` (train fraction 0.
 guard equal to the 2 s window, control seed, leaky-split seed) were likewise fixed
 before the first real-data run, and every run records them in `run_summary.json`.
 
+**Phase 2 additions.** The evaluation thresholds are in D-022. The session parameters were
+fixed on 2026-09-16, from cohort scores and genuine-only cohort replays, before any holdout
+session result:
+
+| Threshold | Value | Constant | What it decides |
+|---|---|---|---|
+| Session unit | protected score, not the LLR | `session/logic.py` | The units every level below is in (D-025) |
+| EMA half-life | 4 s | `PRE_REGISTERED_THRESHOLDS.ema_half_life_s` | How fast confidence follows the windows |
+| Revoke below | 0.56 | `.revoke_below` | Terminal revocation |
+| Challenge below | 0.58 | `.challenge_below` | Step-up prompt |
+| Recover above | 0.62 | `.recover_above` | A challenged session returns to active |
+
+The same rule applies to them: not adjustable after holdout results, and a change needs an
+entry here reporting results under both values. `tests/test_session_parameters.py` pins them,
+and the reasoning is in D-025.
+
 ---
 
 ### D-017 — A deliberately leaky random split, run as a labelled demonstration
@@ -1040,3 +1056,121 @@ recording session.
 as Phase 1 (0.846 against 0.378). It is the same effect seen under a second model and task
 framing on shared data, not an independent replication. The ratios are on different metrics
 and are not compared numerically.
+
+---
+
+### D-025 — Session parameters, pre-registered from cohort data
+
+**Decision.** Fixed on 2026-09-16, from cohort scores and genuine-only cohort replays only.
+The holdout was never read. Under the D-016 rule these are not adjustable after holdout
+results, and `tests/test_session_parameters.py` pins them.
+
+| Parameter | Value |
+|---|---|
+| Unit | protected Hamming similarity, not the LLR |
+| EMA half-life | 4 s |
+| Revoke below | 0.56 |
+| Challenge below | 0.58 |
+| Recover above (challenged to active) | 0.62 |
+
+**Why the score and not the LLR.** Impostor sessions against worst-decile templates peak at a
+median LLR of −0.53, against −1.24 for other accounts (p90 1.25 against 0.56). In score units
+the same sessions peak at 0.547 against 0.537. A global LLR threshold therefore gives the
+weakest accounts a higher FAR than everyone else: security traded for usability on exactly
+the accounts least able to afford it, which hard rule 4 forbids. The decision layer's
+per-template z-score input is what tilts it. The LLR still travels beside the score for
+logging and for Phase 3, and the session logic does not read it.
+
+**Why a 4 s half-life.** Genuine within-session SD falls 2.6× from raw windows to 4 s, and
+only 1.8× more from 4 s to 12 s. On swaps, 2 s catches sooner but lets 1.6% of impostor
+sessions through at 0.56; 8 s has a median detection of 16 s and 4.7% escaping; 12 s catches
+only 59% of armed swaps within 25 s.
+
+**Why revoke at 0.56,** raised from 0.54. At 0.54, 7.1% of impostor sessions never cross and
+the 90th percentile of detection is censored beyond 25 s. At 0.56: genuine false-cross 6.2%,
+median detection 10 s, p90 23 s, never-caught 2.9%. The extra false revocations buy a 2.4×
+reduction in impostors who escape entirely.
+
+**Why challenge at 0.58.** Genuine false-cross 16.2%, 96.1% of armed swaps caught within
+25 s, median detection 8 s. A challenge is a step-up prompt, not a lockout, so a higher false
+rate is affordable there.
+
+**Why recover at 0.62.** Impostor session maxima at a 4 s half-life have a p90 of 0.601, so
+0.62 sits above nearly all of them: an impostor session should almost never climb back into
+an active state.
+
+**Known limitation: challenge and revoke are 0.02 apart.** That is about one within-session
+SD at this half-life (0.021 for other accounts), so the two will often fire nearly together
+and a challenge will frequently be a formality before revocation. This is not a tuning
+failure. The genuine and impostor distributions are close (settled medians 0.679 and 0.501,
+both with a within-session SD near 0.02), so any usable gap between the levels is small. The
+gap is a property of the representation, and D-021 fixed that representation.
+
+**Self-splice control: passes.** Registered in D-022 at a maximum excess of 0.10 over
+genuine-only replays at the revoke level. A self-splice is the subject's own recording
+spliced onto itself, which keeps the discontinuity and removes the identity change.
+Cohort-only, at the parameters above, crossing within (30, 55] s:
+
+| Level | Group | Genuine | Self-splice | Excess | Real swaps |
+|---|---|---|---|---|---|
+| revoke 0.56 | all 89 | 14.6% | 13.5% | −1.1 | 91.9% |
+| revoke 0.56 | others (80) | 6.2% | 3.8% | −2.5 | 91.2% |
+| revoke 0.56 | worst decile (9) | 88.9% | 100.0% | +11.1 | 98.0% |
+| challenge 0.58 | all 89 | 19.1% | 16.9% | −2.2 | 96.7% |
+
+The splice artifact is not what detection is picking up, so swap timings may be reported as
+time-to-detect. The worst-decile row exceeds the limit, but the criterion was registered over
+genuine-only replays as a whole, that row is one session out of nine, and its genuine rate of
+88.9% leaves almost no headroom to measure an excess in. It is reported, not treated as
+evidence about the splice.
+
+**Longer sessions are projected, not measured.** Every rate above comes from a 55 s replay:
+52 settled decisions, 51 s. Two Poisson projections bracket a longer session, and for revoke
+at 0.56 on the 80 non-tail subjects they are far apart:
+
+| Horizon | Per-subject projection | Pooled projection |
+|---|---|---|
+| 5 min | 6.2% | 55.5% |
+| 10 min | 6.2% | 80.2% |
+| 30 min | 6.2% | 99.2% |
+
+The per-subject projection is flat because every crossing comes from the same 6.2% of
+subjects (median rate 0, p90 0), and for those subjects a crossing is near-certain within a
+minute. The pooled projection spreads the group's average rate over every user, which the
+data contradict. The honest reading is the lower one: a small identifiable minority is
+revoked almost immediately, and the rest were never observed to cross. What the data cannot
+do is bound the rest: 51 s per subject leaves a 95% upper bound near 3.5 crossings per minute
+for a subject with none observed, and stationarity over half an hour (drowsiness, movement,
+electrode drift) is untested on single-session data.
+
+**If a lower long-session revoke rate is wanted,** the lever is a dwell requirement (revoke
+only after k consecutive sub-threshold decisions) inside `update_session`, not a change to
+the pre-registered level. Crossings cluster, so a dwell would cut the false rate sharply and
+lengthen detection. It changes reported time-to-detect and false-revoke rates, so it has to
+be fixed before the holdout session run, exactly like the levels here.
+
+---
+
+### D-026 — The worst decile is unusable under these parameters, and that is reported, not tuned away
+
+**Finding.** With the D-025 parameters, for the nine subjects in the worst decile of
+cohort per-subject EER:
+
+- 88.9% of their genuine sessions cross the 0.56 revoke level within the horizon window, and
+  100% cross the 0.58 challenge level;
+- their confidence barely moves when someone else takes over: 0.553 at the swap and 0.521
+  twelve seconds later, because their genuine and impostor levels nearly coincide (settled
+  medians 0.554 and 0.512);
+- so the system both rejects them constantly and cannot tell when the person changes.
+
+**This is a limitation to report, not a tuning target.** Softening the levels for nine
+subjects would raise FAR for all 89, which hard rule 4 forbids. Per-subject thresholds do not
+help either: their per-subject EER of 39.5% is already measured at each subject's own best
+threshold, so the failure is separability, not calibration
+(`docs/PHASE2_PER_SUBJECT_THRESHOLDS.md`).
+
+**What would help** is enrolling across brain states, since the within-state split shows most
+of these subjects verify well without the state change (D-024). That is a Phase 3 protocol
+question. Until then the product answer is a fallback factor for these users, and the rate is
+reported rather than hidden: about one user in ten on this dataset, under a change of brain
+state that enrollment did not cover.

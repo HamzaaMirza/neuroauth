@@ -1,8 +1,11 @@
 """Session state machine: confidence decay, challenge and revoke thresholds.
 
-AUTHOR-WRITTEN (CLAUDE.md). Only the types, the signatures, and the pre-registered parameter
-values are settled here. The bodies of `update_session` and `initial_session_state` are the
-author's.
+AUTHOR-SPECIFIED (CLAUDE.md lists this module on the author-writes-by-hand list). The types,
+the signatures, the pre-registered parameters, and every rule the bodies implement — the skip
+rule, the span bound, the gap rule, the order of judgement — are the author's, fixed before
+the bodies existed. The bodies below were written to that specification on the author's
+explicit instruction; the resolutions marked below were not in the specification and are the
+implementer's, flagged for review.
 
 **The unit is the protected score**, WindowObservation.score: Hamming similarity in [0, 1],
 in steps of 1/64. Not the LLR. A global LLR threshold gives the weakest accounts a higher FAR
@@ -54,16 +57,51 @@ lets a run span more than `revoke_dwell_decisions` seconds, so a run whose first
 sub-threshold decisions are more than `revoke_dwell_max_span_s` apart expires: the counter
 resets, and the decision that overran the bound starts a new run.
 
+**A gap breaks a dwell run, independently of the span bound.** A run means consecutive
+decisions on one continuous stream. After a gap the buffer was reset and warm-up restarted,
+and the server cannot know how long the gap lasted: session time counts received samples, so
+the span bound is blind to it. Carrying a run across a gap would let revocation fire on
+evidence from before a disconnect of unknown length, so `gap_before` resets the counter.
+The cost is recorded rather than hidden: an attacker who can drop frames can restart the
+count, buying warm-up plus three decisions per gap. Closing that needs either an arrival
+clock in the runtime or a gap budget, and both are parameters that would have to be
+pre-registered (D-025). *Delegated to the implementer.* The other reading — that the span
+bound already covers this, so a gap should leave the run alone — is defensible only if session
+time tracked wall-clock time, and it does not.
+
+**The levels are compared against the confidence, not the window score.** *Not specified;
+implementer's resolution.* That is how the parameters were measured (the cost tables in D-025
+run the EMA and count sub-threshold confidences), and it is what "recovery above 0.62"
+already implies. Reading the levels against the raw window score instead is the other
+defensible reading, and it would revoke far more often: the EMA exists to absorb single-window
+dips, and the measured escape and t50 numbers would not describe the system.
+
+**Unusable decisions do not move the confidence at all,** so signal quality cannot by itself
+drive a challenge. Quality has its own path, `max_consecutive_not_ok`. *Not specified;
+implementer's resolution.* The alternative reading — decaying the EMA toward a floor value on
+a bad window, or decaying it toward nothing over elapsed time — would revoke genuine users for
+a loose electrode through the identity path, which is exactly the confusion the skip rule was
+pre-registered to avoid.
+
+**min_scored_windows gates the identity transitions only** (challenge, recovery, revoke),
+not expiry. *Not specified; implementer's resolution.* The gate exists because confidence is
+meaningless before it has evidence, and expiry does not read confidence. Gating expiry too
+would let a session that never produces a usable window sit in "active" indefinitely, which
+is the stall the dwell bound exists to prevent.
+
 Recovery is an ordinary transition from "challenged" to "active", with the reason naming the
 level crossed. Revocation is the same shape with to_state "revoked"; because terminal states
 absorb, the runtime then stops scoring, sends the transition, and closes the socket, and any
 later frame is refused with "session_ended".
 """
 
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, replace
 from typing import Final
 
 from neuroauth.verification.metrics import SessionStateName
+
+TERMINAL_STATES: Final = frozenset({"revoked", "expired", "closed"})
 
 
 @dataclass(frozen=True)
@@ -147,9 +185,14 @@ class SessionState:
         state: Matches the sessions.state CHECK in migrations/001_phase1_core.sql.
         confidence: The EMA of the protected score, in the same units as the thresholds.
             None before the first scored window, which is what min_scored_windows gates on.
-        n_scored_windows: Windows with a score so far.
-        consecutive_not_ok: Current run of not-ok windows.
-        last_decision_time_s: None before the first observation. The EMA uses the gap to it.
+        n_scored_windows: Usable windows (scored and quality-ok) so far.
+        consecutive_not_ok: Current run of unusable windows, whether unscorable or flagged.
+        last_decision_time_s: Time of the last window that moved the confidence, so the EMA
+            decays over the gap between usable decisions. None before the first one.
+        dwell_count: Sub-threshold decisions in the run in progress. A run cannot be
+            rebuilt from confidence alone, so it is carried here.
+        dwell_started_s: Decision time of that run's first sub-threshold decision, which the
+            span bound measures from. None when no run is in progress.
     """
 
     state: SessionStateName
@@ -157,6 +200,8 @@ class SessionState:
     n_scored_windows: int
     consecutive_not_ok: int
     last_decision_time_s: float | None
+    dwell_count: int = 0
+    dwell_started_s: float | None = None
 
 
 @dataclass(frozen=True)
@@ -179,12 +224,58 @@ class SessionTransition:
 
 
 def initial_session_state() -> SessionState:
-    """The state a session starts in.
+    """The state a session starts in: active, with no confidence and no prior.
 
-    Author's. The starting confidence is a prior, and the prior is part of the confidence
-    logic.
+    The EMA seeds from the first usable window rather than from an assumed value, so there
+    is nothing to invent here. "active" means "not yet judged": the min_scored_windows gate
+    keeps the session from transitioning until it has evidence, and a session that produces
+    no usable window can still end through the quality path.
     """
-    raise NotImplementedError("TODO(author): initial session state and confidence prior")
+    return SessionState(
+        state="active",
+        confidence=None,
+        n_scored_windows=0,
+        consecutive_not_ok=0,
+        last_decision_time_s=None,
+        dwell_count=0,
+        dwell_started_s=None,
+    )
+
+
+def _usable(observation: WindowObservation) -> bool:
+    """A decision the identity logic may read: scored, finite, and not quality-flagged."""
+    return (
+        observation.quality_ok
+        and observation.score is not None
+        and math.isfinite(observation.score)
+    )
+
+
+def _decayed(state: SessionState, score: float, now: float, half_life_s: float) -> float:
+    """The EMA after one usable decision, seeding from the first one."""
+    if state.confidence is None or state.last_decision_time_s is None:
+        return score
+    elapsed = now - state.last_decision_time_s
+    if elapsed <= 0.0:
+        # The runtime delivers strictly increasing decision times, so this is unreachable;
+        # keeping the confidence is the conservative answer if that ever changes.
+        return state.confidence
+    alpha = 1.0 - float(0.5 ** (elapsed / half_life_s))
+    return state.confidence + alpha * (score - state.confidence)
+
+
+def _advance_dwell(
+    state: SessionState, confidence: float, now: float, thresholds: SessionThresholds
+) -> tuple[int, float | None]:
+    """The dwell run after one usable decision: (count, run start)."""
+    if confidence >= thresholds.revoke_below:
+        return 0, None
+    started = state.dwell_started_s
+    if state.dwell_count == 0 or started is None:
+        return 1, now
+    if now - started > thresholds.revoke_dwell_max_span_s:
+        return 1, now
+    return state.dwell_count + 1, started
 
 
 def update_session(
@@ -194,10 +285,75 @@ def update_session(
 ) -> tuple[SessionState, SessionTransition | None]:
     """Fold one window observation into the session.
 
-    Author's. See the module docstring for the guarantees the runtime relies on and for the
-    transitions this may return.
+    The order is: absorb terminal states; break any dwell run a gap interrupted; handle an
+    unusable decision on the quality path and stop; otherwise decay the confidence, advance
+    the dwell run, and only then judge. Judging goes revoke, challenge, recover, so the most
+    severe outcome wins when one decision satisfies more than one.
+
+    See the module docstring for the guarantees the runtime relies on, the transitions this
+    may return, and the pre-registered rules it follows (D-025).
 
     Returns:
         (new_state, transition), with transition None unless state.state changed.
     """
-    raise NotImplementedError("TODO(author): EMA confidence decay, challenge/revoke logic")
+    now = observation.decision_time_s
+    if state.state in TERMINAL_STATES:
+        return state, None
+
+    carried = (0, None) if observation.gap_before else (state.dwell_count, state.dwell_started_s)
+    state = replace(state, dwell_count=carried[0], dwell_started_s=carried[1])
+
+    if not _usable(observation):
+        consecutive = state.consecutive_not_ok + 1
+        updated = replace(state, consecutive_not_ok=consecutive)
+        if consecutive > thresholds.max_consecutive_not_ok:
+            reason = (
+                f"{consecutive} consecutive unusable windows, above the "
+                f"{thresholds.max_consecutive_not_ok} tolerated"
+            )
+            return replace(updated, state="expired"), SessionTransition(
+                state.state, "expired", now, state.confidence, reason
+            )
+        return updated, None
+
+    score = float(observation.score) if observation.score is not None else 0.0
+    confidence = _decayed(state, score, now, thresholds.ema_half_life_s)
+    dwell_count, dwell_started = _advance_dwell(state, confidence, now, thresholds)
+    scored = state.n_scored_windows + 1
+    updated = replace(
+        state,
+        confidence=confidence,
+        n_scored_windows=scored,
+        consecutive_not_ok=0,
+        last_decision_time_s=now,
+        dwell_count=dwell_count,
+        dwell_started_s=dwell_started,
+    )
+    if scored < thresholds.min_scored_windows:
+        return updated, None
+
+    def transition(
+        to_state: SessionStateName, reason: str
+    ) -> tuple[SessionState, SessionTransition]:
+        return replace(updated, state=to_state), SessionTransition(
+            state.state, to_state, now, confidence, reason
+        )
+
+    if dwell_count >= thresholds.revoke_dwell_decisions:
+        return transition(
+            "revoked",
+            f"confidence {confidence:.3f} below {thresholds.revoke_below:g} for "
+            f"{dwell_count} consecutive scored decisions",
+        )
+    if state.state == "active" and confidence < thresholds.challenge_below:
+        return transition(
+            "challenged",
+            f"confidence {confidence:.3f} below the challenge level {thresholds.challenge_below:g}",
+        )
+    if state.state == "challenged" and confidence > thresholds.recover_above:
+        return transition(
+            "active",
+            f"confidence {confidence:.3f} back above the recovery level "
+            f"{thresholds.recover_above:g}",
+        )
+    return updated, None

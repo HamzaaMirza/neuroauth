@@ -2,10 +2,8 @@
 
 import dataclasses
 
-import pytest
-
 from neuroauth.session import logic
-from neuroauth.session.logic import PRE_REGISTERED_THRESHOLDS, SessionState, WindowObservation
+from neuroauth.session.logic import PRE_REGISTERED_THRESHOLDS, WindowObservation
 
 
 def test_pre_registered_session_parameters_are_unchanged() -> None:
@@ -27,15 +25,16 @@ def test_thresholds_are_ordered_as_the_state_machine_needs() -> None:
     assert thresholds.revoke_below < thresholds.challenge_below < thresholds.recover_above
 
 
-def test_the_session_logic_is_still_the_authors() -> None:
-    with pytest.raises(NotImplementedError):
-        logic.initial_session_state()
+def test_the_logic_runs_on_the_pre_registered_parameters() -> None:
+    """Behaviour lives in tests/test_session_logic.py; this only pins the wiring."""
     observation = WindowObservation(
         decision_time_s=6.0, score=0.7, llr=2.0, quality_ok=True, gap_before=False
     )
-    state = SessionState("active", None, 0, 0, None)
-    with pytest.raises(NotImplementedError):
-        logic.update_session(state, observation, PRE_REGISTERED_THRESHOLDS)
+    state, transition = logic.update_session(
+        logic.initial_session_state(), observation, PRE_REGISTERED_THRESHOLDS
+    )
+    assert state.confidence == 0.7
+    assert transition is None
 
 
 def test_observation_carries_the_llr_but_thresholds_are_in_score_units() -> None:

@@ -69,7 +69,7 @@ def main() -> int:
     parser.add_argument("--subjects", type=int, default=109, help="how many subjects to fetch")
     args = parser.parse_args()
 
-    print(f"Fetching baseline runs for subjects 1–{args.subjects} into {DATA_DIR}/")
+    print(f"Fetching baseline runs for subjects 1-{args.subjects} into {DATA_DIR}/")
     print("First run downloads; later runs use the cache.\n")
 
     results = []
@@ -84,7 +84,7 @@ def main() -> int:
     good = [r for r in results if r["ok"]]
     bad = [r for r in results if not r["ok"]]
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Usable subjects: {len(good)}/{len(results)}")
     if bad:
         print(f"Problem subjects: {[r['subject'] for r in bad]}")

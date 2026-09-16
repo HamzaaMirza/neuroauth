@@ -8,7 +8,6 @@ import numpy as np
 import pytest
 
 from neuroauth.dsp.streaming import process_recording_bounded
-from neuroauth.session import logic
 from neuroauth.session.logic import SessionTransition
 from neuroauth.session.runtime import (
     FRAME_HEADER,
@@ -65,9 +64,15 @@ def feed(
     return runtime, messages, transitions, False
 
 
-def test_the_authors_session_logic_is_still_a_stub() -> None:
-    with pytest.raises(NotImplementedError):
-        logic.initial_session_state()
+def test_the_runtime_drives_the_real_session_logic(parts: SessionParts) -> None:
+    """No double installed: the runtime starts from initial_session_state and feeds it
+    observations. The min_scored_windows gate means the first decisions stay active."""
+    runtime, messages, _, _ = feed(start(parts), parts.probe.data[:, : round(12 * SFREQ)])
+    windows = [m for m in messages if m["type"] == "window"]
+    assert windows
+    assert windows[0]["state"] == "active"
+    assert isinstance(windows[0]["confidence"], float)
+    assert runtime.session.n_scored_windows == len(windows)
 
 
 def test_frames_round_trip_bit_for_bit() -> None:

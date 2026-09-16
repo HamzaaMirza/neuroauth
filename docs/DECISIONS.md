@@ -1218,6 +1218,40 @@ are 1 s apart, so an unobstructed run spans 2 s; 8 s leaves room for up to six s
 inside a run, which tolerates a genuine burst of bad signal, while capping staleness at two
 EMA half-lives.
 
+**A gap breaks a dwell run, and the stall that leaves open is a recorded cost.** Decided at
+implementation on 2026-09-16, after the parameters above were fixed. It is not pre-registered
+and has no row in the D-016 table, because it judges no result here: the cohort measurements
+replay continuous recordings, so no run in any table above is broken by a gap.
+
+`gap_before` resets the counter. A run means consecutive decisions on one continuous stream:
+after a gap the stream buffer was reset and warm-up restarted, and session time counts
+received samples, so the server cannot know how long the gap lasted and the 8 s span bound is
+blind to it. Carrying a run across a gap would revoke on evidence from before a disconnect of
+unknown length.
+
+**The attacker model, plainly.** An attacker who can drop frames restarts the dwell counter at
+will. Each gap costs them 6 s of warm-up, during which no decision is produced at all, and
+then three sub-threshold decisions before revocation can fire — roughly 9 s of session time
+per gap at the 1 s hop — and it repeats for every gap, indefinitely. Throughout, the session
+stays active, which is the outcome they want. `max_consecutive_not_ok` does not catch it: a
+gap yields no decisions rather than not-ok ones, so the quality path never advances. The same
+reset is also what protects a genuine user whose connection dropped from being revoked on
+stale evidence, which is why the rule is not simply wrong.
+
+**Closing it needs a new parameter, and this data cannot set one.** Either an arrival clock —
+the runtime timestamping frames in wall-clock time, so a gap's real duration is known and the
+span bound can see it — or a gap budget, a cap on gaps per session past which the session
+ends. Both are thresholds that judge a result, so both fall under D-016 and would have to be
+fixed before the run they judge. Neither can be calibrated here: replayed resting-state
+recordings contain no frame loss, so the effect size is zero in this dataset by construction,
+the same reason the span bound's value is untestable above.
+
+**It belongs in Phase 6, with the replay-attack work, not in Phase 2.** An arrival clock is
+the timing envelope already listed there, and a gap budget is the same kind of hostile-traffic
+parameter. Phase 2's exit criterion is that a genuine stream revokes when an impostor is
+swapped in mid-session, which this does not affect. Calibrating either parameter needs traffic
+that drops frames on purpose, which is what `tests/test_replay.py` is for.
+
 **The dwell does nothing for the worst decile.** 88.9% of their genuine sessions are revoked
 at k = 1 and at k = 3 alike. Their sub-threshold stretches are sustained rather than isolated
 dips, which is what near-coinciding genuine and impostor distributions produce (settled

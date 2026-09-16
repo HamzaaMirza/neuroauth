@@ -33,8 +33,14 @@ What the rest of the system relies on, and nothing more:
 |---|---|---|
 | active | challenged | confidence fell below challenge_below: step up, not a lockout |
 | challenged | active | recovery: confidence climbed back to recover_above |
-| active or challenged | revoked | confidence fell below revoke_below. Terminal |
+| active or challenged | revoked | confidence below revoke_below for the whole dwell. Terminal |
 | active or challenged | expired | the author's timeout, if one is implemented. Terminal |
+
+**Revocation carries a dwell, challenge does not** (D-025). Revoking takes
+`revoke_dwell_decisions` consecutive decisions below `revoke_below`; a single decision below
+`challenge_below` challenges immediately, because a spurious step-up prompt is cheap and a
+dwell would only delay it. What "consecutive" does when a decision has no score, or when a
+gap intervenes, is the author's call.
 
 Recovery is an ordinary transition from "challenged" to "active", with the reason naming the
 level crossed. Revocation is the same shape with to_state "revoked"; because terminal states
@@ -52,14 +58,18 @@ from neuroauth.verification.metrics import SessionStateName
 class SessionThresholds:
     """Session parameters, recorded verbatim in sessions.threshold_config.
 
-    The first four are pre-registered (D-025) and fixed under the D-016 rule. The last two
+    The first five are pre-registered (D-025) and fixed under the D-016 rule. The last two
     are the author's and may change without a DECISIONS entry, because they judge no result.
 
     Attributes:
         ema_half_life_s: Decay of the confidence average, in seconds of decision time.
-        challenge_below: Confidence below which an active session is challenged.
-        revoke_below: Confidence below which a session is revoked. Terminal.
+        challenge_below: Confidence below which an active session is challenged, on the
+            first decision. No dwell.
+        revoke_below: Confidence below which a session is revoked, once the dwell is met.
+            Terminal.
         recover_above: Confidence above which a challenged session returns to active.
+        revoke_dwell_decisions: Consecutive decisions below revoke_below needed to revoke.
+            1 would revoke on the first.
         min_scored_windows: Scored windows required before any transition.
         max_consecutive_not_ok: Consecutive not-ok windows tolerated before the author's
             chosen consequence.
@@ -69,6 +79,7 @@ class SessionThresholds:
     challenge_below: float
     revoke_below: float
     recover_above: float
+    revoke_dwell_decisions: int
     min_scored_windows: int
     max_consecutive_not_ok: int
 
@@ -78,12 +89,13 @@ PRE_REGISTERED_THRESHOLDS: Final = SessionThresholds(
     challenge_below=0.58,
     revoke_below=0.56,
     recover_above=0.62,
+    revoke_dwell_decisions=3,
     min_scored_windows=4,
     max_consecutive_not_ok=5,
 )
 """Chosen from cohort scores and genuine-only cohort replays, never from the holdout (D-025).
 
-The four pre-registered values are pinned by tests/test_session_parameters.py. min_scored_
+The five pre-registered values are pinned by tests/test_session_parameters.py. min_scored_
 windows is one half-life of decisions at the 1 s hop; it and max_consecutive_not_ok are the
 author's."""
 

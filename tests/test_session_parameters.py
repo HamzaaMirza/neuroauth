@@ -18,6 +18,7 @@ def test_pre_registered_session_parameters_are_unchanged() -> None:
     assert PRE_REGISTERED_THRESHOLDS.revoke_below == 0.56
     assert PRE_REGISTERED_THRESHOLDS.challenge_below == 0.58
     assert PRE_REGISTERED_THRESHOLDS.recover_above == 0.62
+    assert PRE_REGISTERED_THRESHOLDS.revoke_dwell_decisions == 3
 
 
 def test_thresholds_are_ordered_as_the_state_machine_needs() -> None:

@@ -68,9 +68,8 @@ not looked at.
    in D-025. `docs/PHASE2_PER_SUBJECT_THRESHOLDS.md` stays as the record of what they would
    have cost.
 3. **Author writes `initial_session_state` and `update_session`** (`session/logic.py`), to the
-   settled types and the pre-registered parameters (D-025). Decide any dwell requirement
-   (revoke only after k consecutive sub-threshold decisions) before the holdout session run,
-   since it changes reported time-to-detect and false-revoke rates. If `quality_ok` gates
+   settled types and the pre-registered parameters (D-025), including the revoke dwell of
+   three consecutive sub-threshold decisions; challenge has none. If `quality_ok` gates
    anything, the D-015 recalibration on the enrollable cohort comes first.
 4. **Session evaluation driver**, once `update_session` exists: time-to-detect over holdout
    swaps, false challenge and revoke rates on genuine-only replays, and the self-splice

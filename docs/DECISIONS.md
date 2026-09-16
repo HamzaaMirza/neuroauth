@@ -479,7 +479,8 @@ session result:
 | Session unit | protected score, not the LLR | `session/logic.py` | The units every level below is in (D-025) |
 | EMA half-life | 4 s | `PRE_REGISTERED_THRESHOLDS.ema_half_life_s` | How fast confidence follows the windows |
 | Revoke below | 0.56 | `.revoke_below` | Terminal revocation |
-| Challenge below | 0.58 | `.challenge_below` | Step-up prompt |
+| Revoke dwell | 3 decisions | `.revoke_dwell_decisions` | Consecutive sub-threshold decisions revocation needs |
+| Challenge below | 0.58 | `.challenge_below` | Step-up prompt, no dwell |
 | Recover above | 0.62 | `.recover_above` | A challenged session returns to active |
 
 The same rule applies to them: not adjustable after holdout results, and a change needs an
@@ -1069,8 +1070,8 @@ results, and `tests/test_session_parameters.py` pins them.
 |---|---|
 | Unit | protected Hamming similarity, not the LLR |
 | EMA half-life | 4 s |
-| Revoke below | 0.56 |
-| Challenge below | 0.58 |
+| Revoke below | 0.56, after a dwell of 3 consecutive sub-threshold decisions |
+| Challenge below | 0.58, on the first decision (no dwell) |
 | Recover above (challenged to active) | 0.62 |
 
 **Why the score and not the LLR.** Impostor sessions against worst-decile templates peak at a
@@ -1143,11 +1144,43 @@ do is bound the rest: 51 s per subject leaves a 95% upper bound near 3.5 crossin
 for a subject with none observed, and stationarity over half an hour (drowsiness, movement,
 electrode drift) is untested on single-session data.
 
-**If a lower long-session revoke rate is wanted,** the lever is a dwell requirement (revoke
-only after k consecutive sub-threshold decisions) inside `update_session`, not a change to
-the pre-registered level. Crossings cluster, so a dwell would cut the false rate sharply and
-lengthen detection. It changes reported time-to-detect and false-revoke rates, so it has to
-be fixed before the holdout session run, exactly like the levels here.
+**Dwell: revoke needs three consecutive sub-threshold decisions.** Fixed 2026-09-16, before
+the holdout session run, because it changes both reported numbers. Challenge keeps no dwell:
+a spurious step-up prompt is cheap, and a dwell would only delay it.
+
+The reason is the unmeasured risk rather than the measured one. Crossings cluster; 51 s per
+subject cannot bound the 94% of subjects with no crossing observed; and stationarity is
+untested, with drowsiness, movement and electrode drift all pushing the rate up over a longer
+session. A dwell is cheap insurance against a long-session false-revoke rate that can only be
+worse than what was measured.
+
+Measured on cohort data at the pre-registered parameters, k = 1 against k = 3:
+
+| Group | Genuine revoked | Self-splice | Swaps caught | Median | p90 | Impostors escaping |
+|---|---|---|---|---|---|---|
+| others (80), k = 1 | 6.2% | 3.8% | 91.2% | 10 s | 23 s | 2.9% |
+| others (80), k = 3 | 5.0% | 0.0% | 87.8% | 12 s | > 25 s | 3.9% |
+| all 89, k = 1 | 14.6% | 13.5% | 91.4% | 9 s | 22 s | 2.8% |
+| all 89, k = 3 | 13.5% | 7.9% | 87.8% | 11 s | > 25 s | 3.9% |
+| worst decile (9), k = 3 | 88.9% | 77.8% | 88.1% | 7 s | > 25 s | 3.3% |
+
+So the dwell costs about 2 s of median detection, as expected from the swap trajectory being
+continuously below 0.56 from roughly +10 s. The tail cost is larger than the median cost: the
+90th percentile crosses the 25 s horizon, and the share of swaps caught within it falls by
+3.4 points while impostors escaping entirely rises by 1.0. On the measured 51 s window the
+dwell buys only 1.2 points of genuine false-revoke, and it removes self-splice revocations
+for the non-tail subjects outright (3.8% to 0.0%). Its purpose is the long-session rate that
+this dataset cannot measure.
+
+**The stationarity check does not reassure, and the direction is the wrong one.** Between the
+first and second halves of the settled 51 s, revoke crossings per minute rise in both groups
+(worst decile 2.353 to 3.922; others 0.147 to 0.176), while challenge crossings fall in both
+(4.183 to 3.660; 0.588 to 0.529). None of the four differences is distinguishable from
+Poisson noise: the counts behind them are 9 against 15 crossings for the worst-decile revoke
+rows and 5 against 6 for the others. The check is therefore underpowered, not evidence of
+stationarity, and the flat per-subject projections above should be read as a known optimism:
+the revoke rate trends upward inside the only window we can see, and everything untested
+about longer sessions pushes the same way.
 
 ---
 

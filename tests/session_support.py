@@ -18,6 +18,7 @@ from neuroauth.dsp.streaming import process_recording_bounded
 from neuroauth.dsp.types import Condition, Recording
 from neuroauth.session import logic
 from neuroauth.session.logic import (
+    PRE_REGISTERED_THRESHOLDS,
     SessionState,
     SessionThresholds,
     SessionTransition,
@@ -34,14 +35,9 @@ STREAMING = StreamingConfig()
 CHANNELS = CH_NAMES[:8]
 SECRET = bytes(range(32))
 HOLDOUT = frozenset({90})
-THRESHOLDS = SessionThresholds(
-    ema_half_life_s=5.0,
-    challenge_below=0.6,
-    revoke_below=0.5,
-    recover_above=0.7,
-    min_scored_windows=3,
-    max_consecutive_not_ok=5,
-)
+THRESHOLDS = PRE_REGISTERED_THRESHOLDS
+"""The session double below ignores these; tests use the registered values so a parameter
+change shows up here too."""
 
 
 def recording(subject: int, run: int, *, seed: int, duration_s: float = 40.0) -> Recording:
